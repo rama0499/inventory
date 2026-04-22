@@ -452,9 +452,15 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
             {/* ============ OVERVIEW ============ */}
             {tab === 'overview' && (
               <div className="space-y-4">
-                {/* Purpose banner */}
+                {/* Purpose banner — mode-aware tagline */}
                 <div className="glass p-3 border border-primary/20">
-                  <p className="text-xs text-muted-foreground">📊 <strong className="text-foreground">Overview</strong> — Quick snapshot of your entire inventory health, stock status, and recent activity at a glance.</p>
+                  <p className="text-xs text-muted-foreground">
+                    📊 <strong className="text-foreground">Overview</strong> — {isSmall
+                      ? 'Basic tool: stock status and simple alerts at a glance.'
+                      : mode === 'medium'
+                        ? 'Smart assistant: stock health with sales speed and risk insights.'
+                        : 'Advanced business system: full intelligence, predictions, and recommendations.'}
+                  </p>
                 </div>
 
                 {/* Key metrics */}
@@ -473,24 +479,26 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
                   ))}
                 </div>
 
-                {/* Financial snapshot */}
-                <div className="grid gap-3 grid-cols-2 md:grid-cols-3">
-                  <div className="glass p-3 text-center">
-                    <p className="text-xs text-muted-foreground mb-1">💰 Stock Value (Cost)</p>
-                    <p className="text-lg font-black font-display text-primary">{fmt(totalStockValue)}</p>
-                    <p className="text-[10px] text-muted-foreground">What you paid for inventory</p>
+                {/* Financial snapshot — hidden in SMALL mode (basic tool only) */}
+                {!isSmall && (
+                  <div className="grid gap-3 grid-cols-2 md:grid-cols-3">
+                    <div className="glass p-3 text-center">
+                      <p className="text-xs text-muted-foreground mb-1">💰 Stock Value (Cost)</p>
+                      <p className="text-lg font-black font-display text-primary">{fmt(totalStockValue)}</p>
+                      <p className="text-[10px] text-muted-foreground">What you paid for inventory</p>
+                    </div>
+                    <div className="glass p-3 text-center">
+                      <p className="text-xs text-muted-foreground mb-1">🏷️ Retail Value</p>
+                      <p className="text-lg font-black font-display text-accent">{fmt(totalRetailValue)}</p>
+                      <p className="text-[10px] text-muted-foreground">What you can earn if sold</p>
+                    </div>
+                    <div className="glass p-3 text-center">
+                      <p className="text-xs text-muted-foreground mb-1">💵 Total Revenue</p>
+                      <p className="text-lg font-black font-display text-accent">{fmt(totalRevenue)}</p>
+                      <p className="text-[10px] text-muted-foreground">{totalSalesCount} sale(s) made</p>
+                    </div>
                   </div>
-                  <div className="glass p-3 text-center">
-                    <p className="text-xs text-muted-foreground mb-1">🏷️ Retail Value</p>
-                    <p className="text-lg font-black font-display text-accent">{fmt(totalRetailValue)}</p>
-                    <p className="text-[10px] text-muted-foreground">What you can earn if sold</p>
-                  </div>
-                  <div className="glass p-3 text-center">
-                    <p className="text-xs text-muted-foreground mb-1">💵 Total Revenue</p>
-                    <p className="text-lg font-black font-display text-accent">{fmt(totalRevenue)}</p>
-                    <p className="text-[10px] text-muted-foreground">{totalSalesCount} sale(s) made</p>
-                  </div>
-                </div>
+                )}
 
                 {/* Alerts summary */}
                 {alerts.length > 0 && (
