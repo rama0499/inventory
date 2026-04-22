@@ -58,11 +58,11 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
   const refresh = useCallback(() => {
     const p = Inv.get(business.id);
     setProducts(p);
-    setAlerts(AlertSvc.generate(p));
-    setSuggestions(AlertSvc.suggestions(p));
+    setAlerts(AlertSvc.generate(p, mode));
+    setSuggestions(AlertSvc.suggestions(p, mode));
     setActionLogs(ActionHistory.get(business.id));
     setFinancials(Analytics.financials(business.id));
-  }, [business.id]);
+  }, [business.id, mode]);
 
   useEffect(() => {
     refresh();
