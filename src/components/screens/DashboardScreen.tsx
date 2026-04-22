@@ -658,7 +658,7 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
                               <p className="text-foreground/80 text-sm font-medium">{a.message}</p>
                               {a.reason && <p className="text-foreground/60 text-xs mt-1.5 border-l-2 border-muted-foreground/20 pl-2 whitespace-pre-line">{a.reason}</p>}
                               <p className="mt-2 font-bold text-sm whitespace-pre-line">{a.action}</p>
-                              {a.category !== 'expired' && a.category !== 'expiring' && a.category !== 'outofstock' && a.potentialLoss !== undefined && a.potentialLoss > 0 && <p className="text-xs text-destructive/80 mt-1">💸 At risk: {fmt(a.potentialLoss)}</p>}
+                              {!isSmall && a.category !== 'expired' && a.category !== 'expiring' && a.category !== 'outofstock' && a.potentialLoss !== undefined && a.potentialLoss > 0 && <p className="text-xs text-destructive/80 mt-1">💸 At risk: {fmt(a.potentialLoss)}</p>}
                             </div>
                             <div className="flex gap-2">
                               {a.actionType === 'reorder' && <button onClick={() => { const p = products.find(x => x.id === a.productId); if (p) { setReorderProduct(p); setReorderForm({ qty: String(Math.min(p.reorderPoint ? p.reorderPoint * 3 : 50, 200)), expiryDate: '' }); } }} className="bg-warning/10 border border-warning/30 text-warning px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-warning/20 flex items-center gap-1 shrink-0"><RefreshCw size={12} /> Reorder</button>}
