@@ -364,11 +364,13 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
                 <label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Quantity to Order</label>
                 <input type="number" value={reorderForm.qty} onChange={e => setReorderForm(f => ({ ...f, qty: e.target.value }))} placeholder="50" className={inputCls} autoFocus />
               </div>
-                <div className="mb-3">
-                  <label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Expiry Date (this batch)</label>
-                  <input type="text" inputMode="numeric" value={reorderForm.expiryDate} onChange={e => setReorderForm(f => ({ ...f, expiryDate: e.target.value }))} placeholder="DD/MM/YYYY" className={inputCls + ' font-mono'} />
-                  <p className="text-[10px] text-muted-foreground/70 mt-1">Use DD/MM/YYYY. Leave blank if not perishable.</p>
-                </div>
+                {reorderProduct.hasExpiry !== false && (
+                  <div className="mb-3">
+                    <label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Expiry Date (this batch)</label>
+                    <input type="text" inputMode="numeric" value={reorderForm.expiryDate} onChange={e => setReorderForm(f => ({ ...f, expiryDate: e.target.value }))} placeholder="DD/MM/YYYY" className={inputCls + ' font-mono'} />
+                    <p className="text-[10px] text-muted-foreground/70 mt-1">Use DD/MM/YYYY for this batch.</p>
+                  </div>
+                )}
               <div className="flex gap-2">
                 <button onClick={handleReorder} className="flex-1 bg-warning/20 border border-warning/40 text-warning font-bold py-2 rounded-xl text-sm hover:bg-warning/30">✅ Reorder</button>
                 <button onClick={() => setReorderProduct(null)} className="flex-1 bg-muted/30 border border-border text-muted-foreground font-bold py-2 rounded-xl text-sm hover:bg-muted/50">Cancel</button>
