@@ -629,7 +629,7 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
                         {filtered.map(p => {
                           const isLow = p.quantity > 0 && p.quantity <= p.reorderPoint;
                           const isOut = p.quantity === 0;
-                            const isExpired = p.expiryDate ? (getDaysUntilExpiry(p.expiryDate) ?? 1) <= 0 : false;
+                            const isExpired = p.hasExpiry !== false && p.expiryDate ? (getDaysUntilExpiry(p.expiryDate) ?? 1) <= 0 : false;
                           return (
                             <tr key={p.id} className={`border-b border-border/30 hover:bg-muted/10 ${isExpired ? 'bg-destructive/5' : isOut ? 'bg-destructive/5' : ''}`}>
                               <td className="px-3 py-2.5"><p className="font-medium text-foreground">{p.name}</p><p className="text-[10px] text-muted-foreground font-mono tabular-nums inline-block min-w-[12ch]">{p.barcode}</p></td>
@@ -637,7 +637,7 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
                               <td className="px-3 py-2.5"><span className={`font-bold ${isOut ? 'text-destructive' : isLow ? 'text-warning' : 'text-accent'}`}>{p.quantity}</span> <span className="text-[10px] text-muted-foreground">{p.unit}</span></td>
                               <td className="px-3 py-2.5 text-muted-foreground">{fmt(p.costPrice)}</td>
                               <td className="px-3 py-2.5 text-foreground font-medium">{fmt(p.sellingPrice)}</td>
-                              <td className="px-3 py-2.5">{p.expiryDate ? <span className={`text-xs ${isExpired ? 'text-destructive font-bold' : 'text-muted-foreground'}`}>{isExpired ? `❌ Expired • ${formatDisplayDate(p.expiryDate)}` : formatDisplayDate(p.expiryDate)}</span> : <span className="text-muted-foreground/40 text-xs">—</span>}</td>
+                              <td className="px-3 py-2.5">{p.hasExpiry === false ? <span className="text-muted-foreground/40 text-xs italic">No expiry</span> : (p.expiryDate ? <span className={`text-xs ${isExpired ? 'text-destructive font-bold' : 'text-muted-foreground'}`}>{isExpired ? `❌ Expired • ${formatDisplayDate(p.expiryDate)}` : formatDisplayDate(p.expiryDate)}</span> : <span className="text-muted-foreground/40 text-xs">—</span>)}</td>
                               <td className="px-3 py-2.5"><div className="flex gap-1">
                                 <button onClick={() => { setSaleProduct(p); setSaleForm({ qty: '', price: String(p.sellingPrice) }); setErr(''); }} className="text-accent hover:bg-accent/10 p-1 rounded-lg" title="Sell"><ShoppingCart size={14} /></button>
                                 <button onClick={() => { setReorderProduct(p); setReorderForm({ qty: String(Math.min(p.reorderPoint ? p.reorderPoint * 3 : 50, 200)), expiryDate: '' }); }} className="text-warning hover:bg-warning/10 p-1 rounded-lg" title="Reorder"><RefreshCw size={14} /></button>
