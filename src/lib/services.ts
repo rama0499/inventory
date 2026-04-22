@@ -358,6 +358,7 @@ export const AlertSvc = {
     const isSmall = mode === 'small';
     const isMedium = mode === 'medium';
     const isLarge = mode === 'large';
+    const season = getCurrentSeason(today);
 
     products.forEach(p => {
       // Skip expiry tracking entirely if user marked item as non-expiry
