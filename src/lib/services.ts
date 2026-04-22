@@ -2,8 +2,15 @@ import DB, { type Product, type Alert, type Suggestion, type Sale, type ActionLo
 import { getDaysUntilExpiry, normalizeExpiryDate, parseExpiryDate } from './inventory-utils';
 
 function sanitizeProductInput(p: Partial<Product>): Partial<Product> {
-  if (!('expiryDate' in p)) return p;
-  return { ...p, expiryDate: normalizeExpiryDate(p.expiryDate) };
+  const out: Partial<Product> = { ...p };
+  if ('expiryDate' in p) out.expiryDate = normalizeExpiryDate(p.expiryDate);
+  // Backward-compat: if hasExpiry not provided, infer from expiryDate
+  if (out.hasExpiry === undefined) {
+    out.hasExpiry = Boolean(out.expiryDate);
+  }
+  // If user explicitly opted out of expiry, clear expiryDate
+  if (out.hasExpiry === false) out.expiryDate = '';
+  return out;
 }
 
 function sameCalendarDay(a: string | null | undefined, b: string | null | undefined): boolean {
