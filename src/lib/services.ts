@@ -449,19 +449,36 @@ export const AlertSvc = {
           const lossAmount = p.costPrice * unitsAtRisk;
           const expectedRevenue = p.sellingPrice * batch.quantity;
           const discount = getSmartDiscountPercent(p, batch.quantity, d, speed, risk);
+          const cls = classifyCategory(p);
+
+          // Category-aware "why" phrasing — pharmacy/food = urgency, others = time-based
+          const urgencyWhy = cls === 'pharmacy'
+            ? `Medicine nearing expiry — needs urgent action before it becomes illegal to sell.`
+            : (cls === 'food' || cls === 'beverages')
+              ? `Item is nearing expiry — once expired, it cannot be sold and becomes a full loss.`
+              : cls === 'cosmetics'
+                ? `Beauty product nearing expiry — quality drops and customers avoid old stock.`
+                : `Item nearing expiry — value drops sharply once the date passes.`;
 
           let priorityColor: 'red' | 'orange' | 'yellow' = 'yellow';
           if (risk === 'high') priorityColor = 'red';
           else if (risk === 'medium') priorityColor = 'orange';
 
-          // LOW RISK
+          // LOW RISK — likely to sell in time, no discount needed
           if (risk === 'low' || discount === 0) {
             alerts.push({
               type: 'EXPIRING_SOON', severity: 'info', productId: p.id, productName: p.name,
               category: 'expiring',
               message: `${p.name} — ${batch.quantity} unit(s), ${d} day(s) left.`,
-              reason: `💡 Likely to sell in time.\n💸 At risk: ${formatCurrency(lossAmount)}.`,
-              action: '👉 Continue normal selling',
+              reason: buildReason({
+                problem: `${batch.quantity} unit(s) expire in ${d} day(s).`,
+                why: `Selling at current pace (~${speed.toFixed(1)}/day) should clear the batch in time.`,
+                impact: `Small risk: ${formatCurrency(lossAmount)} if pace slows.`,
+              }),
+              action: buildAction(
+                'Continue normal selling. Place stock at the front for visibility.',
+                `Earn the full expected revenue of ${formatCurrency(expectedRevenue)}.`
+              ),
               priorityColor,
               daysLeft: d,
               batchId: batch.id,
@@ -474,25 +491,27 @@ export const AlertSvc = {
           const discountedPrice = Math.round(p.sellingPrice * (1 - discount / 100));
           const recoverable = Math.max(0, discountedPrice * batch.quantity);
           const neededPerDay = Math.ceil(batch.quantity / Math.max(1, d));
+          const paceLine = speed > 0
+            ? `Selling ~${speed.toFixed(1)}/day but need ~${neededPerDay}/day to clear before expiry.`
+            : `No recent sales — need ~${neededPerDay}/day to clear before expiry.`;
 
-          // Reason — short, clear, mode-aware
-          const reasonText = isMedium
-            ? (risk === 'high'
-                ? `💡 Need ~${neededPerDay}/day to clear → high risk.\n💸 At risk: ${formatCurrency(lossAmount)}.`
-                : `💡 ${speed > 0 ? `Selling ~${speed.toFixed(1)}/day, need ~${neededPerDay}/day` : `No recent sales, need ~${neededPerDay}/day`} → risk.\n💸 At risk: ${formatCurrency(lossAmount)}.`)
-            : // LARGE — predictive framing
-              (risk === 'high'
-                ? `💡 At current pace, ${unitsAtRisk} unit(s) likely to expire unsold.\n💸 At risk: ${formatCurrency(lossAmount)} of ${formatCurrency(expectedRevenue)} expected revenue.`
-                : `💡 Demand may not absorb full stock in ${d} day(s). Need ~${neededPerDay}/day vs current ${speed.toFixed(1)}/day.\n💸 At risk: ${formatCurrency(lossAmount)}.`);
+          // Reason — structured: problem / why (urgency + pace) / impact
+          const reasonText = buildReason({
+            problem: `${unitsAtRisk} of ${batch.quantity} unit(s) likely to expire unsold (${d} day(s) left).`,
+            why: `${urgencyWhy} ${paceLine}`,
+            impact: `If no action: you may lose ${formatCurrency(lossAmount)} of ${formatCurrency(expectedRevenue)} expected revenue.`,
+          });
 
-          // Action — recovery framing per spec
-          const recoveryLine = `You may not achieve full expected revenue (${formatCurrency(expectedRevenue)}), but you can still recover around ${formatCurrency(recoverable)}.`;
-          const actionText = isMedium
-            ? (risk === 'high'
-                ? `👉 Apply ${discount}% discount now. ${recoveryLine}`
-                : `👉 Try a promotion first. If slow, apply ${discount}% discount. ${recoveryLine}`)
-            : // LARGE — optimal recovery framing
-              `👉 Apply ${discount}% discount for optimal recovery. ${recoveryLine}`;
+          // Action + Benefit — loss vs recovery framing
+          const actionText = (isMedium && risk !== 'high')
+            ? buildAction(
+                `Try a promotion first. If sales stay slow, apply ${discount}% discount.`,
+                `If discounted, you can still recover around ${formatCurrency(recoverable)} instead of losing ${formatCurrency(lossAmount)}.`
+              )
+            : buildAction(
+                `Apply ${discount}% discount now for optimal recovery.`,
+                `You may not achieve full revenue (${formatCurrency(expectedRevenue)}), but you can still recover around ${formatCurrency(recoverable)}.`
+              );
 
           alerts.push({
             type: 'EXPIRING_SOON', severity: risk === 'high' ? 'danger' : 'warning', productId: p.id, productName: p.name,
