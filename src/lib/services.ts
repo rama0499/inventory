@@ -727,6 +727,7 @@ export const AlertSvc = {
 
     // Overall summary suggestions
     const expiredItems = products.filter(p => {
+      if (p.hasExpiry === false) return false;
       const d = getDaysUntilExpiry(p.expiryDate, today);
       return d !== null && d <= 0;
     });
@@ -779,6 +780,7 @@ export const Analytics = {
       totalProfit: sales.reduce((s, x) => s + x.profit, 0),
       inventoryValue: prods.reduce((s, p) => s + p.costPrice * p.quantity, 0),
       potentialLoss: prods.reduce((s, p) => {
+        if (p.hasExpiry === false) return s;
         const d = getDaysUntilExpiry(p.expiryDate);
         if (d !== null && d <= 10)
           return s + p.costPrice * p.quantity;
