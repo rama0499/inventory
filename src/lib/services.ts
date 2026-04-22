@@ -2,8 +2,15 @@ import DB, { type Product, type Alert, type Suggestion, type Sale, type ActionLo
 import { getDaysUntilExpiry, normalizeExpiryDate, parseExpiryDate } from './inventory-utils';
 
 function sanitizeProductInput(p: Partial<Product>): Partial<Product> {
-  if (!('expiryDate' in p)) return p;
-  return { ...p, expiryDate: normalizeExpiryDate(p.expiryDate) };
+  const out: Partial<Product> = { ...p };
+  if ('expiryDate' in p) out.expiryDate = normalizeExpiryDate(p.expiryDate);
+  // Backward-compat: if hasExpiry not provided, infer from expiryDate
+  if (out.hasExpiry === undefined) {
+    out.hasExpiry = Boolean(out.expiryDate);
+  }
+  // If user explicitly opted out of expiry, clear expiryDate
+  if (out.hasExpiry === false) out.expiryDate = '';
+  return out;
 }
 
 function sameCalendarDay(a: string | null | undefined, b: string | null | undefined): boolean {
@@ -276,10 +283,13 @@ export const AlertSvc = {
     const isLarge = mode === 'large';
 
     products.forEach(p => {
-      // === BATCH-LEVEL EXPIRY ALERTS ===
-      const batches = (p.batches && p.batches.length > 0)
-        ? p.batches
-        : (p.expiryDate ? [{ id: 'legacy', quantity: p.quantity, expiryDate: p.expiryDate, addedAt: p.createdAt }] : []);
+      // Skip expiry tracking entirely if user marked item as non-expiry
+      const expiryEnabled = p.hasExpiry !== false;
+      const batches = expiryEnabled
+        ? ((p.batches && p.batches.length > 0)
+            ? p.batches
+            : (p.expiryDate ? [{ id: 'legacy', quantity: p.quantity, expiryDate: p.expiryDate, addedAt: p.createdAt }] : []))
+        : [];
 
       batches.forEach(batch => {
         if (!batch.expiryDate || batch.quantity <= 0) return;
@@ -524,7 +534,35 @@ export const AlertSvc = {
         }
       }
 
-      // === SEASONAL ===
+      // === HIGH INVESTMENT RISK — only for non-expiry items (medium/large) ===
+      // Triggered when an expensive item sits unsold for too long, tying up significant capital.
+      if (!expiryEnabled && p.quantity > 0) {
+        const capitalBlocked = p.costPrice * p.quantity;
+        const speed = getSalesSpeed(p);
+        const daysSinceCreated = Math.ceil((today.getTime() - new Date(p.createdAt).getTime()) / 86400000);
+        // "Expensive" = cost per unit >= 500 (currency-agnostic threshold) OR total blocked capital >= 25,000
+        const isExpensive = p.costPrice >= 500 || capitalBlocked >= 25000;
+        const isUnsold = (p.salesCount || 0) === 0 && daysSinceCreated >= 21;
+        const isSlowAndCostly = speed > 0 && speed < 0.2 && capitalBlocked >= 10000;
+        if (isExpensive && (isUnsold || isSlowAndCostly)) {
+          alerts.push({
+            type: 'HIGH_INVESTMENT_RISK', severity: 'warning', productId: p.id, productName: p.name,
+            category: 'highrisk',
+            message: `${p.name}: ${formatCurrency(capitalBlocked)} tied up in ${p.quantity} unsold unit(s).`,
+            reason: isUnsold
+              ? `💡 No sales in ${daysSinceCreated} day(s). High-value stock with no movement.\n💸 Capital at risk: ${formatCurrency(capitalBlocked)}.`
+              : `💡 Selling ~${speed.toFixed(2)}/day — too slow for a high-value item.\n💸 Capital at risk: ${formatCurrency(capitalBlocked)}.`,
+            action: isLarge
+              ? `👉 Reduce reorder qty, run targeted promotion, or apply 10-15% discount to free capital.`
+              : `👉 Avoid restocking. Promote or discount to free capital.`,
+            actionType: 'discount',
+            potentialLoss: capitalBlocked
+          });
+        }
+      }
+
+      // === SEASONAL — only for relevant categories (Electronics, Clothing, Beverages) ===
+      // Skip Hardware, Stationery, Tools and any other non-seasonal categories.
       const month = today.getMonth();
       const isSummer = month >= 2 && month <= 5;
       const isWinter = month >= 10 || month <= 1;
@@ -532,8 +570,10 @@ export const AlertSvc = {
       const winterKeywords = ['heater', 'blanket', 'sweater', 'jacket', 'warm', 'hot chocolate', 'soup', 'tea', 'coffee'];
       const nameLower = p.name.toLowerCase();
       const catLower = p.category.toLowerCase();
+      const seasonalCategories = ['electronics', 'clothing', 'apparel', 'beverages', 'beverage'];
+      const seasonalAllowed = seasonalCategories.some(c => catLower.includes(c));
 
-      if (isSummer && summerKeywords.some(k => nameLower.includes(k) || catLower.includes(k))) {
+      if (seasonalAllowed && isSummer && summerKeywords.some(k => nameLower.includes(k) || catLower.includes(k))) {
         if (p.quantity <= p.reorderPoint * 2) {
           alerts.push({
             type: 'SEASONAL_DEMAND', severity: 'warning', productId: p.id, productName: p.name,
@@ -545,7 +585,7 @@ export const AlertSvc = {
           });
         }
       }
-      if (isWinter && winterKeywords.some(k => nameLower.includes(k) || catLower.includes(k))) {
+      if (seasonalAllowed && isWinter && winterKeywords.some(k => nameLower.includes(k) || catLower.includes(k))) {
         if (p.quantity <= p.reorderPoint * 2) {
           alerts.push({
             type: 'SEASONAL_DEMAND', severity: 'warning', productId: p.id, productName: p.name,
@@ -580,6 +620,7 @@ export const AlertSvc = {
     // SMALL MODE — only basic, plain-language overall suggestions
     if (isSmall) {
       const expired = products.filter(p => {
+        if (p.hasExpiry === false) return false;
         const d = getDaysUntilExpiry(p.expiryDate, today);
         return d !== null && d <= 0;
       });
@@ -615,6 +656,7 @@ export const AlertSvc = {
     const outOfStock = products.filter(p => p.quantity === 0);
     const overstocked = products.filter(p => p.quantity > (p.reorderPoint || 10) * 5);
     const expiringItems = products.filter(p => {
+      if (p.hasExpiry === false) return false;
       const d = getDaysUntilExpiry(p.expiryDate, today);
       if (d === null) return false;
       return d > 0 && d <= 10;
@@ -685,6 +727,7 @@ export const AlertSvc = {
 
     // Overall summary suggestions
     const expiredItems = products.filter(p => {
+      if (p.hasExpiry === false) return false;
       const d = getDaysUntilExpiry(p.expiryDate, today);
       return d !== null && d <= 0;
     });
@@ -737,6 +780,7 @@ export const Analytics = {
       totalProfit: sales.reduce((s, x) => s + x.profit, 0),
       inventoryValue: prods.reduce((s, p) => s + p.costPrice * p.quantity, 0),
       potentialLoss: prods.reduce((s, p) => {
+        if (p.hasExpiry === false) return s;
         const d = getDaysUntilExpiry(p.expiryDate);
         if (d !== null && d <= 10)
           return s + p.costPrice * p.quantity;

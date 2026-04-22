@@ -18,7 +18,7 @@ export default function InventorySetupScreen({ business, onDone, onBack }: Props
   const [tab, setTab] = useState<AddMode>('single');
   const [form, setForm] = useState({
     name: '', barcode: '', category: '', quantity: '', costPrice: '',
-    sellingPrice: '', unit: 'unit', reorderPoint: '', expiryDate: ''
+    sellingPrice: '', unit: 'unit', reorderPoint: '', expiryDate: '', hasExpiry: 'yes'
   });
   const [bulkText, setBulkText] = useState('');
   const [err, setErr] = useState('');
@@ -37,16 +37,21 @@ export default function InventorySetupScreen({ business, onDone, onBack }: Props
     if (!form.name || !form.barcode || !form.category || !form.quantity || !form.costPrice || !form.sellingPrice) {
       setErr('Name, barcode, category, quantity, cost price, and selling price are required.'); return;
     }
+    const wantsExpiry = form.hasExpiry === 'yes';
+    if (wantsExpiry && !form.expiryDate.trim()) {
+      setErr('Expiry date is required when "Has expiry" is Yes.'); return;
+    }
     const r = Inv.add(business.id, {
       name: form.name, barcode: form.barcode, category: form.category,
       quantity: parseInt(form.quantity), costPrice: parseFloat(form.costPrice),
       sellingPrice: parseFloat(form.sellingPrice), unit: form.unit,
       reorderPoint: parseInt(form.reorderPoint) || 10,
-      expiryDate: form.expiryDate,
+      hasExpiry: wantsExpiry,
+      expiryDate: wantsExpiry ? form.expiryDate : '',
     } as Partial<Product>);
     if (r.error) { setErr(r.error); return; }
     setOk(`${form.name} added successfully!`);
-    setForm({ name: '', barcode: '', category: '', quantity: '', costPrice: '', sellingPrice: '', unit: 'unit', reorderPoint: '', expiryDate: '' });
+    setForm({ name: '', barcode: '', category: '', quantity: '', costPrice: '', sellingPrice: '', unit: 'unit', reorderPoint: '', expiryDate: '', hasExpiry: 'yes' });
     refresh();
   };
 
@@ -158,9 +163,18 @@ export default function InventorySetupScreen({ business, onDone, onBack }: Props
                     <input type="number" step="0.01" value={form.sellingPrice} onChange={update('sellingPrice')} required placeholder="0.00" className={inputCls} />
                   </div>
                   <div>
-                    <label className="block text-xs text-muted-foreground font-bold uppercase tracking-wider mb-1">Expiry Date</label>
-                    <input value={form.expiryDate} onChange={update('expiryDate')} placeholder="DD/MM/YYYY" className={inputCls + ' font-mono'} />
+                    <label className="block text-xs text-muted-foreground font-bold uppercase tracking-wider mb-1">Has Expiry?</label>
+                    <select value={form.hasExpiry} onChange={e => setForm(f => ({ ...f, hasExpiry: e.target.value, expiryDate: e.target.value === 'no' ? '' : f.expiryDate }))} className={inputCls}>
+                      <option value="yes">Yes</option>
+                      <option value="no">No</option>
+                    </select>
                   </div>
+                  {form.hasExpiry === 'yes' && (
+                    <div>
+                      <label className="block text-xs text-muted-foreground font-bold uppercase tracking-wider mb-1">Expiry Date <span className="text-destructive">*</span></label>
+                      <input value={form.expiryDate} onChange={update('expiryDate')} required placeholder="DD/MM/YYYY" className={inputCls + ' font-mono'} />
+                    </div>
+                  )}
                 </div>
 
                 <button type="submit"

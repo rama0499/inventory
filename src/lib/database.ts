@@ -47,6 +47,7 @@ export interface Product {
   unit: string;
   reorderPoint: number;
   reorderQty: number;
+  hasExpiry?: boolean; // does this item have an expiry date? defaults to true if expiryDate present
   expiryDate: string; // earliest batch expiry (for backward compat / sorting)
   batches?: Batch[];  // batch-level expiry tracking
   salesCount: number;
@@ -88,7 +89,7 @@ export interface Alert {
   action: string;
   actionType?: 'reorder' | 'discount' | 'remove' | 'promote';
   potentialLoss?: number;
-  category: 'expired' | 'expiring' | 'lowstock' | 'outofstock' | 'overstock' | 'salesspeed' | 'seasonal' | 'deadstock';
+  category: 'expired' | 'expiring' | 'lowstock' | 'outofstock' | 'overstock' | 'salesspeed' | 'seasonal' | 'deadstock' | 'highrisk';
   priorityColor?: 'red' | 'orange' | 'yellow';
   daysLeft?: number;
   discountPercent?: number;

@@ -21,7 +21,7 @@ interface Props {
 }
 
 type Tab = 'overview' | 'inventory' | 'alerts' | 'suggestions' | 'analytics' | 'financials' | 'history';
-type AlertCategory = 'all' | 'expired' | 'expiring' | 'lowstock' | 'outofstock' | 'overstock' | 'salesspeed' | 'seasonal' | 'deadstock';
+type AlertCategory = 'all' | 'expired' | 'expiring' | 'lowstock' | 'outofstock' | 'overstock' | 'salesspeed' | 'seasonal' | 'deadstock' | 'highrisk';
 
 export default function DashboardScreen({ user, business, mode, onLogout, onBackToModeSelect }: Props) {
   const [tab, setTab] = useState<Tab>('overview');
@@ -44,7 +44,7 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
   const [reorderForm, setReorderForm] = useState({ qty: '', expiryDate: '' });
   const [productForm, setProductForm] = useState({
     name: '', barcode: '', category: '', quantity: '', costPrice: '',
-    sellingPrice: '', unit: 'unit', reorderPoint: '', expiryDate: ''
+    sellingPrice: '', unit: 'unit', reorderPoint: '', expiryDate: '', hasExpiry: 'yes'
   });
   const [bulkText, setBulkText] = useState('');
   const [err, setErr] = useState('');
@@ -111,6 +111,7 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
     salesspeed: alerts.filter(a => a.category === 'salesspeed').length,
     seasonal: alerts.filter(a => a.category === 'seasonal').length,
     deadstock: alerts.filter(a => a.category === 'deadstock').length,
+    highrisk: alerts.filter(a => a.category === 'highrisk').length,
   }), [alerts]);
   const filteredAlerts = useMemo(() => alertCategory === 'all' ? alerts : alerts.filter(a => a.category === alertCategory), [alerts, alertCategory]);
 
@@ -118,11 +119,20 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
     e.preventDefault(); setErr(''); setOk('');
     const f = productForm;
     if (!f.name || !f.barcode || !f.category || !f.quantity || !f.costPrice || !f.sellingPrice) { setErr('All required fields must be filled.'); return; }
-    const r = Inv.add(business.id, { name: f.name, barcode: f.barcode, category: f.category, quantity: parseInt(f.quantity), costPrice: parseFloat(f.costPrice), sellingPrice: parseFloat(f.sellingPrice), unit: f.unit, reorderPoint: parseInt(f.reorderPoint) || 10, expiryDate: f.expiryDate } as Partial<Product>);
+    const wantsExpiry = f.hasExpiry === 'yes';
+    if (wantsExpiry && !f.expiryDate.trim()) { setErr('Expiry date is required when "Has expiry" is Yes.'); return; }
+    const r = Inv.add(business.id, {
+      name: f.name, barcode: f.barcode, category: f.category,
+      quantity: parseInt(f.quantity), costPrice: parseFloat(f.costPrice),
+      sellingPrice: parseFloat(f.sellingPrice), unit: f.unit,
+      reorderPoint: parseInt(f.reorderPoint) || 10,
+      hasExpiry: wantsExpiry,
+      expiryDate: wantsExpiry ? f.expiryDate : '',
+    } as Partial<Product>);
     if (r.error) { setErr(r.error); return; }
     ActionHistory.log(business.id, (r as any).product?.id || '', f.name, 'add', `Added "${f.name}" with ${f.quantity} units`);
     setOk('Product added!');
-    setProductForm({ name: '', barcode: '', category: '', quantity: '', costPrice: '', sellingPrice: '', unit: 'unit', reorderPoint: '', expiryDate: '' });
+    setProductForm({ name: '', barcode: '', category: '', quantity: '', costPrice: '', sellingPrice: '', unit: 'unit', reorderPoint: '', expiryDate: '', hasExpiry: 'yes' });
     refresh();
   };
 
@@ -247,6 +257,7 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
     { id: 'lowstock', label: 'Low Stock', icon: <Truck size={14} />, count: alertCounts.lowstock, color: 'text-warning' },
     { id: 'deadstock', label: 'Dead Stock', icon: <Skull size={14} />, count: alertCounts.deadstock, color: 'text-destructive' },
     { id: 'salesspeed', label: 'Sales Speed', icon: <Gauge size={14} />, count: alertCounts.salesspeed, color: 'text-accent' },
+    { id: 'highrisk', label: 'High Risk', icon: <DollarSign size={14} />, count: alertCounts.highrisk, color: 'text-warning' },
     { id: 'seasonal', label: 'Seasonal', icon: <Sun size={14} />, count: alertCounts.seasonal, color: 'text-secondary' },
   ];
 
@@ -353,11 +364,13 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
                 <label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Quantity to Order</label>
                 <input type="number" value={reorderForm.qty} onChange={e => setReorderForm(f => ({ ...f, qty: e.target.value }))} placeholder="50" className={inputCls} autoFocus />
               </div>
-                <div className="mb-3">
-                  <label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Expiry Date (this batch)</label>
-                  <input type="text" inputMode="numeric" value={reorderForm.expiryDate} onChange={e => setReorderForm(f => ({ ...f, expiryDate: e.target.value }))} placeholder="DD/MM/YYYY" className={inputCls + ' font-mono'} />
-                  <p className="text-[10px] text-muted-foreground/70 mt-1">Use DD/MM/YYYY. Leave blank if not perishable.</p>
-                </div>
+                {reorderProduct.hasExpiry !== false && (
+                  <div className="mb-3">
+                    <label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Expiry Date (this batch)</label>
+                    <input type="text" inputMode="numeric" value={reorderForm.expiryDate} onChange={e => setReorderForm(f => ({ ...f, expiryDate: e.target.value }))} placeholder="DD/MM/YYYY" className={inputCls + ' font-mono'} />
+                    <p className="text-[10px] text-muted-foreground/70 mt-1">Use DD/MM/YYYY for this batch.</p>
+                  </div>
+                )}
               <div className="flex gap-2">
                 <button onClick={handleReorder} className="flex-1 bg-warning/20 border border-warning/40 text-warning font-bold py-2 rounded-xl text-sm hover:bg-warning/30">✅ Reorder</button>
                 <button onClick={() => setReorderProduct(null)} className="flex-1 bg-muted/30 border border-border text-muted-foreground font-bold py-2 rounded-xl text-sm hover:bg-muted/50">Cancel</button>
@@ -578,7 +591,16 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
                               <div><label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Selling Price *</label><input type="number" step="0.01" value={productForm.sellingPrice} onChange={e => setProductForm(f => ({ ...f, sellingPrice: e.target.value }))} required className={inputCls} /></div>
                               <div><label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Unit</label><select value={productForm.unit} onChange={e => setProductForm(f => ({ ...f, unit: e.target.value }))} className={inputCls}>{UNITS.map(u => <option key={u} value={u}>{u}</option>)}</select></div>
                               <div><label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Min. Threshold</label><input type="number" value={productForm.reorderPoint} onChange={e => setProductForm(f => ({ ...f, reorderPoint: e.target.value }))} placeholder="10" className={inputCls} /></div>
-                              <div><label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Expiry Date</label><input type="text" inputMode="numeric" value={productForm.expiryDate} onChange={e => setProductForm(f => ({ ...f, expiryDate: e.target.value }))} placeholder="DD/MM/YYYY" className={inputCls + ' font-mono'} /></div>
+                              <div>
+                                <label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Has Expiry?</label>
+                                <select value={productForm.hasExpiry} onChange={e => setProductForm(f => ({ ...f, hasExpiry: e.target.value, expiryDate: e.target.value === 'no' ? '' : f.expiryDate }))} className={inputCls}>
+                                  <option value="yes">Yes</option>
+                                  <option value="no">No</option>
+                                </select>
+                              </div>
+                              {productForm.hasExpiry === 'yes' && (
+                                <div><label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Expiry Date *</label><input type="text" inputMode="numeric" value={productForm.expiryDate} onChange={e => setProductForm(f => ({ ...f, expiryDate: e.target.value }))} required placeholder="DD/MM/YYYY" className={inputCls + ' font-mono'} /></div>
+                              )}
                             </div>
                             <button type="submit" className="bg-primary/10 border border-primary/30 text-primary font-bold py-2 px-6 rounded-xl text-sm hover:bg-primary/20 flex items-center gap-2"><Plus size={14} /> Add Product</button>
                           </form>
@@ -607,7 +629,7 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
                         {filtered.map(p => {
                           const isLow = p.quantity > 0 && p.quantity <= p.reorderPoint;
                           const isOut = p.quantity === 0;
-                            const isExpired = p.expiryDate ? (getDaysUntilExpiry(p.expiryDate) ?? 1) <= 0 : false;
+                            const isExpired = p.hasExpiry !== false && p.expiryDate ? (getDaysUntilExpiry(p.expiryDate) ?? 1) <= 0 : false;
                           return (
                             <tr key={p.id} className={`border-b border-border/30 hover:bg-muted/10 ${isExpired ? 'bg-destructive/5' : isOut ? 'bg-destructive/5' : ''}`}>
                               <td className="px-3 py-2.5"><p className="font-medium text-foreground">{p.name}</p><p className="text-[10px] text-muted-foreground font-mono tabular-nums inline-block min-w-[12ch]">{p.barcode}</p></td>
@@ -615,7 +637,7 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
                               <td className="px-3 py-2.5"><span className={`font-bold ${isOut ? 'text-destructive' : isLow ? 'text-warning' : 'text-accent'}`}>{p.quantity}</span> <span className="text-[10px] text-muted-foreground">{p.unit}</span></td>
                               <td className="px-3 py-2.5 text-muted-foreground">{fmt(p.costPrice)}</td>
                               <td className="px-3 py-2.5 text-foreground font-medium">{fmt(p.sellingPrice)}</td>
-                              <td className="px-3 py-2.5">{p.expiryDate ? <span className={`text-xs ${isExpired ? 'text-destructive font-bold' : 'text-muted-foreground'}`}>{isExpired ? `❌ Expired • ${formatDisplayDate(p.expiryDate)}` : formatDisplayDate(p.expiryDate)}</span> : <span className="text-muted-foreground/40 text-xs">—</span>}</td>
+                              <td className="px-3 py-2.5">{p.hasExpiry === false ? <span className="text-muted-foreground/40 text-xs italic">No expiry</span> : (p.expiryDate ? <span className={`text-xs ${isExpired ? 'text-destructive font-bold' : 'text-muted-foreground'}`}>{isExpired ? `❌ Expired • ${formatDisplayDate(p.expiryDate)}` : formatDisplayDate(p.expiryDate)}</span> : <span className="text-muted-foreground/40 text-xs">—</span>)}</td>
                               <td className="px-3 py-2.5"><div className="flex gap-1">
                                 <button onClick={() => { setSaleProduct(p); setSaleForm({ qty: '', price: String(p.sellingPrice) }); setErr(''); }} className="text-accent hover:bg-accent/10 p-1 rounded-lg" title="Sell"><ShoppingCart size={14} /></button>
                                 <button onClick={() => { setReorderProduct(p); setReorderForm({ qty: String(Math.min(p.reorderPoint ? p.reorderPoint * 3 : 50, 200)), expiryDate: '' }); }} className="text-warning hover:bg-warning/10 p-1 rounded-lg" title="Reorder"><RefreshCw size={14} /></button>
