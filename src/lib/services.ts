@@ -283,10 +283,13 @@ export const AlertSvc = {
     const isLarge = mode === 'large';
 
     products.forEach(p => {
-      // === BATCH-LEVEL EXPIRY ALERTS ===
-      const batches = (p.batches && p.batches.length > 0)
-        ? p.batches
-        : (p.expiryDate ? [{ id: 'legacy', quantity: p.quantity, expiryDate: p.expiryDate, addedAt: p.createdAt }] : []);
+      // Skip expiry tracking entirely if user marked item as non-expiry
+      const expiryEnabled = p.hasExpiry !== false;
+      const batches = expiryEnabled
+        ? ((p.batches && p.batches.length > 0)
+            ? p.batches
+            : (p.expiryDate ? [{ id: 'legacy', quantity: p.quantity, expiryDate: p.expiryDate, addedAt: p.createdAt }] : []))
+        : [];
 
       batches.forEach(batch => {
         if (!batch.expiryDate || batch.quantity <= 0) return;
