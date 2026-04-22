@@ -260,16 +260,93 @@ export function getDaysUntilStockout(p: Product): number {
 }
 
 // Calculate a sensible reorder quantity based on sales speed and reorder point
-function sensibleReorderQty(p: Product): number {
+// Reorder = avg daily sales × cover days (default 30)
+function sensibleReorderQty(p: Product, coverDays = 30): number {
   const speed = getSalesSpeed(p);
   if (speed > 0) {
-    // Order enough for ~30 days of sales, capped at reasonable limits
-    const qty = Math.ceil(speed * 30);
+    const qty = Math.ceil(speed * coverDays);
     return Math.max(p.reorderPoint || 10, Math.min(qty, Math.max(200, (p.reorderPoint || 10) * 5)));
   }
   // No sales data: use reorder point * 2 or a reasonable default
   const rp = p.reorderPoint || 10;
   return Math.min(rp * 3, 200);
+}
+
+// === CATEGORY CLASSIFIER ===
+// Maps any free-text category/name to a behavior bucket so reasoning can adapt.
+export type CategoryClass = 'food' | 'pharmacy' | 'cosmetics' | 'beverages' | 'clothing' | 'electronics' | 'generic';
+
+export function classifyCategory(p: Pick<Product, 'category' | 'name'>): CategoryClass {
+  const c = (p.category || '').toLowerCase();
+  const n = (p.name || '').toLowerCase();
+  const has = (k: string) => c.includes(k) || n.includes(k);
+  if (['medicine', 'pharma', 'health', 'supplement', 'tablet', 'syrup', 'drug'].some(has)) return 'pharmacy';
+  if (['food', 'dairy', 'bakery', 'snack', 'grocery', 'grain', 'cereal', 'oil', 'spice', 'instant food', 'breakfast'].some(has)) return 'food';
+  if (['cosmetic', 'beauty', 'skincare', 'personal care'].some(has)) return 'cosmetics';
+  if (['beverage', 'drink', 'juice', 'water', 'soda', 'cola', 'tea', 'coffee'].some(has)) return 'beverages';
+  if (['clothing', 'apparel', 'wear', 'shirt', 'jeans', 'jacket', 'sweater', 'dress'].some(has)) return 'clothing';
+  if (['electronic', 'gadget', 'appliance', 'ac', 'cooler', 'fan', 'heater', 'tv', 'mobile', 'laptop'].some(has)) return 'electronics';
+  return 'generic';
+}
+
+// === SEASONAL INTELLIGENCE ===
+export type Season = 'summer' | 'monsoon' | 'autumn' | 'winter' | 'spring';
+
+export function getCurrentSeason(d = new Date()): Season {
+  const m = d.getMonth(); // 0-11
+  if (m >= 2 && m <= 4) return 'summer';        // Mar-May
+  if (m >= 5 && m <= 7) return 'monsoon';       // Jun-Aug
+  if (m === 8 || m === 9) return 'autumn';      // Sep-Oct
+  if (m === 10 || m === 11 || m === 0) return 'winter'; // Nov-Jan
+  return 'spring';                              // Feb
+}
+
+// Returns 'high' | 'low' | 'neutral' demand context for an item in current season.
+function getSeasonalDemand(p: Product, season: Season): 'high' | 'low' | 'neutral' {
+  const cls = classifyCategory(p);
+  // Seasonal logic only applies to clothing, electronics, beverages
+  if (!['clothing', 'electronics', 'beverages'].includes(cls)) return 'neutral';
+  const n = (p.name + ' ' + p.category).toLowerCase();
+  const summerHot = ['cooler', 'fan', 'ac', 'air conditioner', 'ice', 'cold', 'juice', 'water', 'lemon', 'lassi', 'buttermilk', 'sunscreen', 'umbrella', 't-shirt', 'shorts', 'cotton'];
+  const winterHot = ['heater', 'blanket', 'sweater', 'jacket', 'warm', 'hot chocolate', 'soup', 'tea', 'coffee', 'wool', 'thermal'];
+  if (season === 'summer') {
+    if (summerHot.some(k => n.includes(k))) return 'high';
+    if (winterHot.some(k => n.includes(k))) return 'low';
+  }
+  if (season === 'winter') {
+    if (winterHot.some(k => n.includes(k))) return 'high';
+    if (summerHot.some(k => n.includes(k))) return 'low';
+  }
+  if (season === 'monsoon' && ['umbrella', 'raincoat'].some(k => n.includes(k))) return 'high';
+  return 'neutral';
+}
+
+// Short, plain-language seasonal phrase for use inside reasoning.
+function seasonalReasonPhrase(p: Product, season: Season): string {
+  const demand = getSeasonalDemand(p, season);
+  if (demand === 'high') return `This item is in high demand during ${season}.`;
+  if (demand === 'low') return `This item is in low demand during ${season}.`;
+  return '';
+}
+
+// === STRUCTURED ALERT BUILDER ===
+// Builds a multi-line "reason" block following the spec:
+//   💡 Problem — what's happening
+//   📌 Why — reason (category/season aware)
+//   💸 Impact — what you may lose
+function buildReason(parts: { problem?: string; why?: string; impact?: string }): string {
+  const lines: string[] = [];
+  if (parts.problem) lines.push(`💡 ${parts.problem}`);
+  if (parts.why) lines.push(`📌 ${parts.why}`);
+  if (parts.impact) lines.push(`💸 ${parts.impact}`);
+  return lines.join('\n');
+}
+
+// Builds the "action" block:
+//   👉 Action — what to do
+//   ✅ Benefit — what you can recover/earn
+function buildAction(action: string, benefit?: string): string {
+  return benefit ? `👉 ${action}\n✅ ${benefit}` : `👉 ${action}`;
 }
 
 // Alerts - categorized. Mode-aware: 'small' = basic, 'medium' = smart with reasoning + ₹ risk,
