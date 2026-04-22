@@ -620,6 +620,7 @@ export const AlertSvc = {
     // SMALL MODE — only basic, plain-language overall suggestions
     if (isSmall) {
       const expired = products.filter(p => {
+        if (p.hasExpiry === false) return false;
         const d = getDaysUntilExpiry(p.expiryDate, today);
         return d !== null && d <= 0;
       });
@@ -655,6 +656,7 @@ export const AlertSvc = {
     const outOfStock = products.filter(p => p.quantity === 0);
     const overstocked = products.filter(p => p.quantity > (p.reorderPoint || 10) * 5);
     const expiringItems = products.filter(p => {
+      if (p.hasExpiry === false) return false;
       const d = getDaysUntilExpiry(p.expiryDate, today);
       if (d === null) return false;
       return d > 0 && d <= 10;
