@@ -571,10 +571,44 @@ export const AlertSvc = {
     return alerts;
   },
 
-  // Suggestions - distinct from alerts, overall actionable advice
-  suggestions: (products: Product[]): Suggestion[] => {
+  // Suggestions - distinct from alerts, overall actionable advice. Mode-aware.
+  suggestions: (products: Product[], mode: BusinessMode = 'large'): Suggestion[] => {
     const s: Suggestion[] = [];
     const today = new Date();
+    const isSmall = mode === 'small';
+
+    // SMALL MODE — only basic, plain-language overall suggestions
+    if (isSmall) {
+      const expired = products.filter(p => {
+        const d = getDaysUntilExpiry(p.expiryDate, today);
+        return d !== null && d <= 0;
+      });
+      const lowStock = products.filter(p => p.quantity > 0 && p.quantity <= p.reorderPoint);
+      const outOfStock = products.filter(p => p.quantity === 0);
+
+      if (expired.length > 0) {
+        s.push({
+          type: 'OVERALL_EXPIRED', productId: '', productName: 'Overall',
+          suggestion: `${expired.length} item(s) have expired. Remove them to keep your shop safe.`,
+          priority: 'high'
+        });
+      }
+      if (outOfStock.length > 0) {
+        s.push({
+          type: 'URGENT_RESTOCK', productId: '', productName: 'Overall',
+          suggestion: `${outOfStock.length} item(s) are out of stock. Reorder soon.`,
+          priority: 'high'
+        });
+      }
+      if (lowStock.length > 0) {
+        s.push({
+          type: 'OVERALL_LOWSTOCK', productId: '', productName: 'Overall',
+          suggestion: `${lowStock.length} item(s) are running low. Reorder soon.`,
+          priority: 'medium'
+        });
+      }
+      return s;
+    }
 
     // Overall inventory health suggestions
     const totalValue = products.reduce((sum, p) => sum + p.costPrice * p.quantity, 0);
