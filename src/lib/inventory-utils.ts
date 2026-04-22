@@ -93,8 +93,15 @@ export function parseInventoryCsvText(text: string): Partial<Product>[] {
       const parts = line.split(',').map(cleanCell);
       if (!parts[0]) return null;
 
-      const hasReorderQty = parts.length >= 10;
-      const expiryDate = parts[hasReorderQty ? 9 : 8] || '';
+      // Supported columns (in order):
+      // name,barcode,category,quantity,costPrice,sellingPrice,unit,reorderPoint,[reorderQty,]expiryDate[,hasExpiry]
+      const hasReorderQty = parts.length >= 10 && /^\d+$/.test(parts[8] || '');
+      const expiryIdx = hasReorderQty ? 9 : 8;
+      const expiryDate = parts[expiryIdx] || '';
+      const hasExpiryRaw = (parts[expiryIdx + 1] || '').toLowerCase().trim();
+      const hasExpiry = hasExpiryRaw
+        ? !['no', 'false', '0', 'n'].includes(hasExpiryRaw)
+        : Boolean(expiryDate);
 
       return {
         name: parts[0],
@@ -106,7 +113,8 @@ export function parseInventoryCsvText(text: string): Partial<Product>[] {
         unit: parts[6] || 'unit',
         reorderPoint: Number.parseInt(parts[7] || '10', 10) || 10,
         reorderQty: hasReorderQty ? Number.parseInt(parts[8] || '50', 10) || 50 : 50,
-        expiryDate: normalizeExpiryDate(expiryDate),
+        hasExpiry,
+        expiryDate: hasExpiry ? normalizeExpiryDate(expiryDate) : '',
       } satisfies Partial<Product>;
     })
     .filter((item): item is Partial<Product> => item !== null);

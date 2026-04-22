@@ -89,7 +89,7 @@ export interface Alert {
   action: string;
   actionType?: 'reorder' | 'discount' | 'remove' | 'promote';
   potentialLoss?: number;
-  category: 'expired' | 'expiring' | 'lowstock' | 'outofstock' | 'overstock' | 'salesspeed' | 'seasonal' | 'deadstock';
+  category: 'expired' | 'expiring' | 'lowstock' | 'outofstock' | 'overstock' | 'salesspeed' | 'seasonal' | 'deadstock' | 'highrisk';
   priorityColor?: 'red' | 'orange' | 'yellow';
   daysLeft?: number;
   discountPercent?: number;
