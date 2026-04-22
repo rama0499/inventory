@@ -589,7 +589,16 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
                               <div><label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Selling Price *</label><input type="number" step="0.01" value={productForm.sellingPrice} onChange={e => setProductForm(f => ({ ...f, sellingPrice: e.target.value }))} required className={inputCls} /></div>
                               <div><label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Unit</label><select value={productForm.unit} onChange={e => setProductForm(f => ({ ...f, unit: e.target.value }))} className={inputCls}>{UNITS.map(u => <option key={u} value={u}>{u}</option>)}</select></div>
                               <div><label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Min. Threshold</label><input type="number" value={productForm.reorderPoint} onChange={e => setProductForm(f => ({ ...f, reorderPoint: e.target.value }))} placeholder="10" className={inputCls} /></div>
-                              <div><label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Expiry Date</label><input type="text" inputMode="numeric" value={productForm.expiryDate} onChange={e => setProductForm(f => ({ ...f, expiryDate: e.target.value }))} placeholder="DD/MM/YYYY" className={inputCls + ' font-mono'} /></div>
+                              <div>
+                                <label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Has Expiry?</label>
+                                <select value={productForm.hasExpiry} onChange={e => setProductForm(f => ({ ...f, hasExpiry: e.target.value, expiryDate: e.target.value === 'no' ? '' : f.expiryDate }))} className={inputCls}>
+                                  <option value="yes">Yes</option>
+                                  <option value="no">No</option>
+                                </select>
+                              </div>
+                              {productForm.hasExpiry === 'yes' && (
+                                <div><label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Expiry Date *</label><input type="text" inputMode="numeric" value={productForm.expiryDate} onChange={e => setProductForm(f => ({ ...f, expiryDate: e.target.value }))} required placeholder="DD/MM/YYYY" className={inputCls + ' font-mono'} /></div>
+                              )}
                             </div>
                             <button type="submit" className="bg-primary/10 border border-primary/30 text-primary font-bold py-2 px-6 rounded-xl text-sm hover:bg-primary/20 flex items-center gap-2"><Plus size={14} /> Add Product</button>
                           </form>
