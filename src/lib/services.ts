@@ -844,31 +844,33 @@ export const AlertSvc = {
     const slowMovers = products.filter(p => p.lastSold && Math.ceil((today.getTime() - new Date(p.lastSold).getTime()) / 86400000) >= 15 && p.quantity > 0);
     const fastMovers = products.filter(p => getSalesSpeed(p) > 0).sort((a, b) => getSalesSpeed(b) - getSalesSpeed(a));
 
-    // Fast movers running low - reorder suggestion
+    // Fast movers running low - reorder suggestion (formula: avg daily sales × 30)
     fastMovers.forEach(p => {
       const speed = getSalesSpeed(p);
       const daysLeft = getDaysUntilStockout(p);
       if (daysLeft < 14 && p.quantity > 0) {
+        const qty = Math.max(sensibleReorderQty(p), Math.ceil(speed * 30));
         s.push({
           type: 'REORDER_FAST_SELLER',
           productId: p.id, productName: p.name,
-          suggestion: `${p.name} sells at ${speed.toFixed(1)} units/day and will run out in ~${daysLeft} days. Reorder ${Math.max(sensibleReorderQty(p), Math.ceil(speed * 30))} units to cover next 30 days.`,
+          suggestion: `${p.name} sells at ~${speed.toFixed(1)} units/day and will run out in ~${daysLeft} day(s). 👉 Reorder ${qty} units (~${speed.toFixed(1)}/day × 30 days cover). ✅ Keeps sales flowing for the next month.`,
           priority: daysLeft < 7 ? 'high' : 'medium'
         });
       }
     });
 
-    // Expiring items - discount + bundle strategy
+    // Expiring items - discount + bundle strategy with loss-vs-recovery framing
     expiringItems.forEach(p => {
       const d = getDaysUntilExpiry(p.expiryDate, today);
       if (d === null) return;
       const discount = d <= 3 ? 40 : d <= 7 ? 30 : d <= 14 ? 20 : 15;
       const discountedPrice = p.sellingPrice * (1 - discount / 100);
-      const profitPerUnit = discountedPrice - p.costPrice;
+      const recoverable = discountedPrice * p.quantity;
+      const fullLoss = p.costPrice * p.quantity;
       s.push({
         type: 'CLEAR_EXPIRING',
         productId: p.id, productName: p.name,
-        suggestion: `${p.name} expires in ${d} days. Apply ${discount}% discount (${formatCurrency(discountedPrice)}/unit). ${profitPerUnit >= 0 ? `You still earn ${formatCurrency(profitPerUnit)}/unit profit.` : `Small loss of ${formatCurrency(Math.abs(profitPerUnit))}/unit, but better than losing ${formatCurrency(p.costPrice)}/unit entirely.`} Consider Buy 1 Get 1 deals to move faster.`,
+        suggestion: `${p.name} expires in ${d} day(s). 👉 Apply ${discount}% discount (${formatCurrency(discountedPrice)}/unit) or run a Buy 1 Get 1 deal. ✅ If discounted, you can recover around ${formatCurrency(recoverable)} instead of losing ${formatCurrency(fullLoss)}.`,
         priority: d <= 7 ? 'high' : 'medium'
       });
     });
@@ -876,20 +878,23 @@ export const AlertSvc = {
     // Slow movers - promotion strategy
     slowMovers.forEach(p => {
       const daysSince = Math.ceil((today.getTime() - new Date(p.lastSold!).getTime()) / 86400000);
+      const blocked = p.costPrice * p.quantity;
       s.push({
         type: 'PROMOTE_SLOW_ITEM',
         productId: p.id, productName: p.name,
-        suggestion: `${p.name} hasn't sold in ${daysSince} days. Run promotional ads, place at eye-level shelves, or offer 10-15% discount. ${formatCurrency(p.costPrice * p.quantity)} capital is blocked.`,
+        suggestion: `${p.name} hasn't sold in ${daysSince} days. 👉 Promote with ads, eye-level placement, or a 10–15% discount. ✅ Restart sales before ${formatCurrency(blocked)} of money used to buy this stock gets stuck.`,
         priority: daysSince > 60 ? 'high' : 'medium'
       });
     });
 
     // Overstock - don't reorder + clear strategy
     overstocked.forEach(p => {
+      const blocked = p.costPrice * p.quantity;
+      const recoverable = Math.round(p.sellingPrice * 0.85) * p.quantity;
       s.push({
         type: 'CLEAR_OVERSTOCK',
         productId: p.id, productName: p.name,
-        suggestion: `${p.name} is overstocked (${p.quantity} units, ${Math.round(p.quantity / (p.reorderPoint || 10))}x reorder point). Do NOT reorder. Offer bundle deals, 10% discount, or advertise to clear. ${formatCurrency(p.costPrice * p.quantity)} tied up.`,
+        suggestion: `${p.name} is overstocked (${p.quantity} units, ${Math.round(p.quantity / (p.reorderPoint || 10))}× reorder point). 👉 Do NOT reorder. Offer bundle deals or 10% discount. ✅ Recover around ${formatCurrency(recoverable)} of the ${formatCurrency(blocked)} tied up.`,
         priority: 'medium'
       });
     });
@@ -897,10 +902,14 @@ export const AlertSvc = {
     // Out of stock - urgent reorder
     outOfStock.forEach(p => {
       const speed = getSalesSpeed(p);
+      const qty = sensibleReorderQty(p);
+      const missingProfitPerDay = speed * Math.max(0, p.sellingPrice - p.costPrice);
       s.push({
         type: 'URGENT_RESTOCK',
         productId: p.id, productName: p.name,
-        suggestion: `${p.name} is OUT OF STOCK! ${speed > 0 ? `Was selling ${speed.toFixed(1)} units/day. ` : ''}Reorder ${sensibleReorderQty(p)} units now to avoid losing customers.`,
+        suggestion: speed > 0
+          ? `${p.name} is OUT OF STOCK! Was selling ${speed.toFixed(1)} units/day. 👉 Reorder ${qty} units (~${speed.toFixed(1)}/day × 30 days). ✅ Restocking earns back ~${formatCurrency(missingProfitPerDay)}/day in missed profit.`
+          : `${p.name} is OUT OF STOCK! 👉 Reorder ~${qty} units based on expected demand. ✅ Avoid losing customers to competitors.`,
         priority: 'high'
       });
     });
