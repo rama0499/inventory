@@ -21,7 +21,7 @@ interface Props {
 }
 
 type Tab = 'overview' | 'inventory' | 'alerts' | 'suggestions' | 'analytics' | 'financials' | 'history';
-type AlertCategory = 'all' | 'expired' | 'expiring' | 'lowstock' | 'outofstock' | 'overstock' | 'salesspeed' | 'seasonal' | 'deadstock';
+type AlertCategory = 'all' | 'expired' | 'expiring' | 'lowstock' | 'outofstock' | 'overstock' | 'salesspeed' | 'seasonal' | 'deadstock' | 'highrisk';
 
 export default function DashboardScreen({ user, business, mode, onLogout, onBackToModeSelect }: Props) {
   const [tab, setTab] = useState<Tab>('overview');
@@ -44,7 +44,7 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
   const [reorderForm, setReorderForm] = useState({ qty: '', expiryDate: '' });
   const [productForm, setProductForm] = useState({
     name: '', barcode: '', category: '', quantity: '', costPrice: '',
-    sellingPrice: '', unit: 'unit', reorderPoint: '', expiryDate: ''
+    sellingPrice: '', unit: 'unit', reorderPoint: '', expiryDate: '', hasExpiry: 'yes'
   });
   const [bulkText, setBulkText] = useState('');
   const [err, setErr] = useState('');
@@ -111,6 +111,7 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
     salesspeed: alerts.filter(a => a.category === 'salesspeed').length,
     seasonal: alerts.filter(a => a.category === 'seasonal').length,
     deadstock: alerts.filter(a => a.category === 'deadstock').length,
+    highrisk: alerts.filter(a => a.category === 'highrisk').length,
   }), [alerts]);
   const filteredAlerts = useMemo(() => alertCategory === 'all' ? alerts : alerts.filter(a => a.category === alertCategory), [alerts, alertCategory]);
 
@@ -118,11 +119,20 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
     e.preventDefault(); setErr(''); setOk('');
     const f = productForm;
     if (!f.name || !f.barcode || !f.category || !f.quantity || !f.costPrice || !f.sellingPrice) { setErr('All required fields must be filled.'); return; }
-    const r = Inv.add(business.id, { name: f.name, barcode: f.barcode, category: f.category, quantity: parseInt(f.quantity), costPrice: parseFloat(f.costPrice), sellingPrice: parseFloat(f.sellingPrice), unit: f.unit, reorderPoint: parseInt(f.reorderPoint) || 10, expiryDate: f.expiryDate } as Partial<Product>);
+    const wantsExpiry = f.hasExpiry === 'yes';
+    if (wantsExpiry && !f.expiryDate.trim()) { setErr('Expiry date is required when "Has expiry" is Yes.'); return; }
+    const r = Inv.add(business.id, {
+      name: f.name, barcode: f.barcode, category: f.category,
+      quantity: parseInt(f.quantity), costPrice: parseFloat(f.costPrice),
+      sellingPrice: parseFloat(f.sellingPrice), unit: f.unit,
+      reorderPoint: parseInt(f.reorderPoint) || 10,
+      hasExpiry: wantsExpiry,
+      expiryDate: wantsExpiry ? f.expiryDate : '',
+    } as Partial<Product>);
     if (r.error) { setErr(r.error); return; }
     ActionHistory.log(business.id, (r as any).product?.id || '', f.name, 'add', `Added "${f.name}" with ${f.quantity} units`);
     setOk('Product added!');
-    setProductForm({ name: '', barcode: '', category: '', quantity: '', costPrice: '', sellingPrice: '', unit: 'unit', reorderPoint: '', expiryDate: '' });
+    setProductForm({ name: '', barcode: '', category: '', quantity: '', costPrice: '', sellingPrice: '', unit: 'unit', reorderPoint: '', expiryDate: '', hasExpiry: 'yes' });
     refresh();
   };
 
@@ -247,6 +257,7 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
     { id: 'lowstock', label: 'Low Stock', icon: <Truck size={14} />, count: alertCounts.lowstock, color: 'text-warning' },
     { id: 'deadstock', label: 'Dead Stock', icon: <Skull size={14} />, count: alertCounts.deadstock, color: 'text-destructive' },
     { id: 'salesspeed', label: 'Sales Speed', icon: <Gauge size={14} />, count: alertCounts.salesspeed, color: 'text-accent' },
+    { id: 'highrisk', label: 'High Risk', icon: <DollarSign size={14} />, count: alertCounts.highrisk, color: 'text-warning' },
     { id: 'seasonal', label: 'Seasonal', icon: <Sun size={14} />, count: alertCounts.seasonal, color: 'text-secondary' },
   ];
 
