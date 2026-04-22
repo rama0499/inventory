@@ -392,24 +392,31 @@ export const AlertSvc = {
             return;
           }
 
-          // Medium / Large — add reasoning + risk note
-          const catLow = p.category.toLowerCase();
-          let riskNote = 'May affect customer trust and block storage space.';
-          if (['food', 'dairy', 'bakery', 'snacks', 'beverages', 'grocery'].some(k => catLow.includes(k))) {
-            riskNote = 'Health risk — may cause food poisoning and reduce customer confidence.';
-          } else if (['medicine', 'pharma', 'health', 'supplement'].some(k => catLow.includes(k))) {
-            riskNote = 'Illegal to sell expired medicine. May lead to penalties and loss of trust.';
-          } else if (['cosmetic', 'beauty', 'skincare', 'personal care'].some(k => catLow.includes(k))) {
-            riskNote = 'May cause skin reactions and reduce customer confidence.';
-          } else if (['electronics', 'battery', 'gadget'].some(k => catLow.includes(k))) {
-            riskNote = 'Risk of leakage or malfunction. May impact future sales.';
+          // Medium / Large — category-aware reasoning + structured format
+          const cls = classifyCategory(p);
+          let why = 'Past expiry date — unsafe to sell and blocks shelf space.';
+          if (cls === 'pharmacy') {
+            why = 'Illegal to sell expired medicine. May lead to penalties and loss of customer trust.';
+          } else if (cls === 'food' || cls === 'beverages') {
+            why = 'Health risk — may cause food poisoning and damage your shop reputation.';
+          } else if (cls === 'cosmetics') {
+            why = 'May cause skin reactions. Selling expired beauty products hurts customer trust.';
+          } else if (cls === 'electronics') {
+            why = 'Risk of leakage or malfunction. Selling can lead to returns and bad reviews.';
           }
           alerts.push({
             type: 'EXPIRED', severity: 'danger', productId: p.id, productName: p.name,
             category: 'expired',
             message: `${p.name} — ${batch.quantity} units, expired ${Math.abs(d)} day(s) ago.`,
-            reason: `💡 ${riskNote}\n💸 Loss incurred: ${formatCurrency(lossAmount)}.`,
-            action: '👉 Remove immediately',
+            reason: buildReason({
+              problem: `${batch.quantity} unit(s) already expired.`,
+              why,
+              impact: `Loss incurred: ${formatCurrency(lossAmount)} (cost of unsold stock).`,
+            }),
+            action: buildAction(
+              'Remove these units immediately and update records.',
+              'Protects other stock, frees shelf space, and avoids penalties.'
+            ),
             potentialLoss: lossAmount > 0 ? lossAmount : undefined,
             actionType: 'remove',
             batchId: batch.id,
