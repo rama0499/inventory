@@ -47,6 +47,7 @@ export interface Product {
   unit: string;
   reorderPoint: number;
   reorderQty: number;
+  hasExpiry?: boolean; // does this item have an expiry date? defaults to true if expiryDate present
   expiryDate: string; // earliest batch expiry (for backward compat / sorting)
   batches?: Batch[];  // batch-level expiry tracking
   salesCount: number;
