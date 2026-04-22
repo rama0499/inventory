@@ -260,16 +260,93 @@ export function getDaysUntilStockout(p: Product): number {
 }
 
 // Calculate a sensible reorder quantity based on sales speed and reorder point
-function sensibleReorderQty(p: Product): number {
+// Reorder = avg daily sales × cover days (default 30)
+function sensibleReorderQty(p: Product, coverDays = 30): number {
   const speed = getSalesSpeed(p);
   if (speed > 0) {
-    // Order enough for ~30 days of sales, capped at reasonable limits
-    const qty = Math.ceil(speed * 30);
+    const qty = Math.ceil(speed * coverDays);
     return Math.max(p.reorderPoint || 10, Math.min(qty, Math.max(200, (p.reorderPoint || 10) * 5)));
   }
   // No sales data: use reorder point * 2 or a reasonable default
   const rp = p.reorderPoint || 10;
   return Math.min(rp * 3, 200);
+}
+
+// === CATEGORY CLASSIFIER ===
+// Maps any free-text category/name to a behavior bucket so reasoning can adapt.
+export type CategoryClass = 'food' | 'pharmacy' | 'cosmetics' | 'beverages' | 'clothing' | 'electronics' | 'generic';
+
+export function classifyCategory(p: Pick<Product, 'category' | 'name'>): CategoryClass {
+  const c = (p.category || '').toLowerCase();
+  const n = (p.name || '').toLowerCase();
+  const has = (k: string) => c.includes(k) || n.includes(k);
+  if (['medicine', 'pharma', 'health', 'supplement', 'tablet', 'syrup', 'drug'].some(has)) return 'pharmacy';
+  if (['food', 'dairy', 'bakery', 'snack', 'grocery', 'grain', 'cereal', 'oil', 'spice', 'instant food', 'breakfast'].some(has)) return 'food';
+  if (['cosmetic', 'beauty', 'skincare', 'personal care'].some(has)) return 'cosmetics';
+  if (['beverage', 'drink', 'juice', 'water', 'soda', 'cola', 'tea', 'coffee'].some(has)) return 'beverages';
+  if (['clothing', 'apparel', 'wear', 'shirt', 'jeans', 'jacket', 'sweater', 'dress'].some(has)) return 'clothing';
+  if (['electronic', 'gadget', 'appliance', 'ac', 'cooler', 'fan', 'heater', 'tv', 'mobile', 'laptop'].some(has)) return 'electronics';
+  return 'generic';
+}
+
+// === SEASONAL INTELLIGENCE ===
+export type Season = 'summer' | 'monsoon' | 'autumn' | 'winter' | 'spring';
+
+export function getCurrentSeason(d = new Date()): Season {
+  const m = d.getMonth(); // 0-11
+  if (m >= 2 && m <= 4) return 'summer';        // Mar-May
+  if (m >= 5 && m <= 7) return 'monsoon';       // Jun-Aug
+  if (m === 8 || m === 9) return 'autumn';      // Sep-Oct
+  if (m === 10 || m === 11 || m === 0) return 'winter'; // Nov-Jan
+  return 'spring';                              // Feb
+}
+
+// Returns 'high' | 'low' | 'neutral' demand context for an item in current season.
+function getSeasonalDemand(p: Product, season: Season): 'high' | 'low' | 'neutral' {
+  const cls = classifyCategory(p);
+  // Seasonal logic only applies to clothing, electronics, beverages
+  if (!['clothing', 'electronics', 'beverages'].includes(cls)) return 'neutral';
+  const n = (p.name + ' ' + p.category).toLowerCase();
+  const summerHot = ['cooler', 'fan', 'ac', 'air conditioner', 'ice', 'cold', 'juice', 'water', 'lemon', 'lassi', 'buttermilk', 'sunscreen', 'umbrella', 't-shirt', 'shorts', 'cotton'];
+  const winterHot = ['heater', 'blanket', 'sweater', 'jacket', 'warm', 'hot chocolate', 'soup', 'tea', 'coffee', 'wool', 'thermal'];
+  if (season === 'summer') {
+    if (summerHot.some(k => n.includes(k))) return 'high';
+    if (winterHot.some(k => n.includes(k))) return 'low';
+  }
+  if (season === 'winter') {
+    if (winterHot.some(k => n.includes(k))) return 'high';
+    if (summerHot.some(k => n.includes(k))) return 'low';
+  }
+  if (season === 'monsoon' && ['umbrella', 'raincoat'].some(k => n.includes(k))) return 'high';
+  return 'neutral';
+}
+
+// Short, plain-language seasonal phrase for use inside reasoning.
+function seasonalReasonPhrase(p: Product, season: Season): string {
+  const demand = getSeasonalDemand(p, season);
+  if (demand === 'high') return `This item is in high demand during ${season}.`;
+  if (demand === 'low') return `This item is in low demand during ${season}.`;
+  return '';
+}
+
+// === STRUCTURED ALERT BUILDER ===
+// Builds a multi-line "reason" block following the spec:
+//   💡 Problem — what's happening
+//   📌 Why — reason (category/season aware)
+//   💸 Impact — what you may lose
+function buildReason(parts: { problem?: string; why?: string; impact?: string }): string {
+  const lines: string[] = [];
+  if (parts.problem) lines.push(`💡 ${parts.problem}`);
+  if (parts.why) lines.push(`📌 ${parts.why}`);
+  if (parts.impact) lines.push(`💸 ${parts.impact}`);
+  return lines.join('\n');
+}
+
+// Builds the "action" block:
+//   👉 Action — what to do
+//   ✅ Benefit — what you can recover/earn
+function buildAction(action: string, benefit?: string): string {
+  return benefit ? `👉 ${action}\n✅ ${benefit}` : `👉 ${action}`;
 }
 
 // Alerts - categorized. Mode-aware: 'small' = basic, 'medium' = smart with reasoning + ₹ risk,
@@ -281,6 +358,7 @@ export const AlertSvc = {
     const isSmall = mode === 'small';
     const isMedium = mode === 'medium';
     const isLarge = mode === 'large';
+    const season = getCurrentSeason(today);
 
     products.forEach(p => {
       // Skip expiry tracking entirely if user marked item as non-expiry
@@ -314,24 +392,31 @@ export const AlertSvc = {
             return;
           }
 
-          // Medium / Large — add reasoning + risk note
-          const catLow = p.category.toLowerCase();
-          let riskNote = 'May affect customer trust and block storage space.';
-          if (['food', 'dairy', 'bakery', 'snacks', 'beverages', 'grocery'].some(k => catLow.includes(k))) {
-            riskNote = 'Health risk — may cause food poisoning and reduce customer confidence.';
-          } else if (['medicine', 'pharma', 'health', 'supplement'].some(k => catLow.includes(k))) {
-            riskNote = 'Illegal to sell expired medicine. May lead to penalties and loss of trust.';
-          } else if (['cosmetic', 'beauty', 'skincare', 'personal care'].some(k => catLow.includes(k))) {
-            riskNote = 'May cause skin reactions and reduce customer confidence.';
-          } else if (['electronics', 'battery', 'gadget'].some(k => catLow.includes(k))) {
-            riskNote = 'Risk of leakage or malfunction. May impact future sales.';
+          // Medium / Large — category-aware reasoning + structured format
+          const cls = classifyCategory(p);
+          let why = 'Past expiry date — unsafe to sell and blocks shelf space.';
+          if (cls === 'pharmacy') {
+            why = 'Illegal to sell expired medicine. May lead to penalties and loss of customer trust.';
+          } else if (cls === 'food' || cls === 'beverages') {
+            why = 'Health risk — may cause food poisoning and damage your shop reputation.';
+          } else if (cls === 'cosmetics') {
+            why = 'May cause skin reactions. Selling expired beauty products hurts customer trust.';
+          } else if (cls === 'electronics') {
+            why = 'Risk of leakage or malfunction. Selling can lead to returns and bad reviews.';
           }
           alerts.push({
             type: 'EXPIRED', severity: 'danger', productId: p.id, productName: p.name,
             category: 'expired',
             message: `${p.name} — ${batch.quantity} units, expired ${Math.abs(d)} day(s) ago.`,
-            reason: `💡 ${riskNote}\n💸 Loss incurred: ${formatCurrency(lossAmount)}.`,
-            action: '👉 Remove immediately',
+            reason: buildReason({
+              problem: `${batch.quantity} unit(s) already expired.`,
+              why,
+              impact: `Loss incurred: ${formatCurrency(lossAmount)} (cost of unsold stock).`,
+            }),
+            action: buildAction(
+              'Remove these units immediately and update records.',
+              'Protects other stock, frees shelf space, and avoids penalties.'
+            ),
             potentialLoss: lossAmount > 0 ? lossAmount : undefined,
             actionType: 'remove',
             batchId: batch.id,
@@ -364,19 +449,36 @@ export const AlertSvc = {
           const lossAmount = p.costPrice * unitsAtRisk;
           const expectedRevenue = p.sellingPrice * batch.quantity;
           const discount = getSmartDiscountPercent(p, batch.quantity, d, speed, risk);
+          const cls = classifyCategory(p);
+
+          // Category-aware "why" phrasing — pharmacy/food = urgency, others = time-based
+          const urgencyWhy = cls === 'pharmacy'
+            ? `Medicine nearing expiry — needs urgent action before it becomes illegal to sell.`
+            : (cls === 'food' || cls === 'beverages')
+              ? `Item is nearing expiry — once expired, it cannot be sold and becomes a full loss.`
+              : cls === 'cosmetics'
+                ? `Beauty product nearing expiry — quality drops and customers avoid old stock.`
+                : `Item nearing expiry — value drops sharply once the date passes.`;
 
           let priorityColor: 'red' | 'orange' | 'yellow' = 'yellow';
           if (risk === 'high') priorityColor = 'red';
           else if (risk === 'medium') priorityColor = 'orange';
 
-          // LOW RISK
+          // LOW RISK — likely to sell in time, no discount needed
           if (risk === 'low' || discount === 0) {
             alerts.push({
               type: 'EXPIRING_SOON', severity: 'info', productId: p.id, productName: p.name,
               category: 'expiring',
               message: `${p.name} — ${batch.quantity} unit(s), ${d} day(s) left.`,
-              reason: `💡 Likely to sell in time.\n💸 At risk: ${formatCurrency(lossAmount)}.`,
-              action: '👉 Continue normal selling',
+              reason: buildReason({
+                problem: `${batch.quantity} unit(s) expire in ${d} day(s).`,
+                why: `Selling at current pace (~${speed.toFixed(1)}/day) should clear the batch in time.`,
+                impact: `Small risk: ${formatCurrency(lossAmount)} if pace slows.`,
+              }),
+              action: buildAction(
+                'Continue normal selling. Place stock at the front for visibility.',
+                `Earn the full expected revenue of ${formatCurrency(expectedRevenue)}.`
+              ),
               priorityColor,
               daysLeft: d,
               batchId: batch.id,
@@ -389,25 +491,27 @@ export const AlertSvc = {
           const discountedPrice = Math.round(p.sellingPrice * (1 - discount / 100));
           const recoverable = Math.max(0, discountedPrice * batch.quantity);
           const neededPerDay = Math.ceil(batch.quantity / Math.max(1, d));
+          const paceLine = speed > 0
+            ? `Selling ~${speed.toFixed(1)}/day but need ~${neededPerDay}/day to clear before expiry.`
+            : `No recent sales — need ~${neededPerDay}/day to clear before expiry.`;
 
-          // Reason — short, clear, mode-aware
-          const reasonText = isMedium
-            ? (risk === 'high'
-                ? `💡 Need ~${neededPerDay}/day to clear → high risk.\n💸 At risk: ${formatCurrency(lossAmount)}.`
-                : `💡 ${speed > 0 ? `Selling ~${speed.toFixed(1)}/day, need ~${neededPerDay}/day` : `No recent sales, need ~${neededPerDay}/day`} → risk.\n💸 At risk: ${formatCurrency(lossAmount)}.`)
-            : // LARGE — predictive framing
-              (risk === 'high'
-                ? `💡 At current pace, ${unitsAtRisk} unit(s) likely to expire unsold.\n💸 At risk: ${formatCurrency(lossAmount)} of ${formatCurrency(expectedRevenue)} expected revenue.`
-                : `💡 Demand may not absorb full stock in ${d} day(s). Need ~${neededPerDay}/day vs current ${speed.toFixed(1)}/day.\n💸 At risk: ${formatCurrency(lossAmount)}.`);
+          // Reason — structured: problem / why (urgency + pace) / impact
+          const reasonText = buildReason({
+            problem: `${unitsAtRisk} of ${batch.quantity} unit(s) likely to expire unsold (${d} day(s) left).`,
+            why: `${urgencyWhy} ${paceLine}`,
+            impact: `If no action: you may lose ${formatCurrency(lossAmount)} of ${formatCurrency(expectedRevenue)} expected revenue.`,
+          });
 
-          // Action — recovery framing per spec
-          const recoveryLine = `You may not achieve full expected revenue (${formatCurrency(expectedRevenue)}), but you can still recover around ${formatCurrency(recoverable)}.`;
-          const actionText = isMedium
-            ? (risk === 'high'
-                ? `👉 Apply ${discount}% discount now. ${recoveryLine}`
-                : `👉 Try a promotion first. If slow, apply ${discount}% discount. ${recoveryLine}`)
-            : // LARGE — optimal recovery framing
-              `👉 Apply ${discount}% discount for optimal recovery. ${recoveryLine}`;
+          // Action + Benefit — loss vs recovery framing
+          const actionText = (isMedium && risk !== 'high')
+            ? buildAction(
+                `Try a promotion first. If sales stay slow, apply ${discount}% discount.`,
+                `If discounted, you can still recover around ${formatCurrency(recoverable)} instead of losing ${formatCurrency(lossAmount)}.`
+              )
+            : buildAction(
+                `Apply ${discount}% discount now for optimal recovery.`,
+                `You may not achieve full revenue (${formatCurrency(expectedRevenue)}), but you can still recover around ${formatCurrency(recoverable)}.`
+              );
 
           alerts.push({
             type: 'EXPIRING_SOON', severity: risk === 'high' ? 'danger' : 'warning', productId: p.id, productName: p.name,
@@ -430,6 +534,8 @@ export const AlertSvc = {
       if (p.quantity === 0) {
         const speed = getSalesSpeed(p);
         const missingProfitPerDay = speed * Math.max(0, p.sellingPrice - p.costPrice);
+        const reorderQty = sensibleReorderQty(p);
+        const seasonPhrase = seasonalReasonPhrase(p, season);
 
         if (isSmall) {
           alerts.push({
@@ -441,14 +547,29 @@ export const AlertSvc = {
             actionType: 'reorder'
           });
         } else {
+          const why = speed > 0
+            ? `Was selling ~${speed.toFixed(1)} units/day. ${seasonPhrase} Customers may switch to a competitor while you're out.`.trim()
+            : `Item is unavailable. ${seasonPhrase} Customers may switch to a competitor.`.trim();
+          const impact = speed > 0
+            ? `Missing profit: ~${formatCurrency(missingProfitPerDay)}/day until you restock.`
+            : `Potential profit missed every day this stays out of stock.`;
           alerts.push({
             type: 'OUT_OF_STOCK', severity: 'danger', productId: p.id, productName: p.name,
             category: 'outofstock',
             message: `${p.name} is out of stock.`,
-            reason: speed > 0
-              ? `💡 Selling at ~${speed.toFixed(1)} units/day. Out of stock means missing ~${formatCurrency(missingProfitPerDay)} profit daily.`
-              : `💡 Item unavailable. Customers may switch to alternatives — potential profit missed.`,
-            action: '👉 Restock immediately',
+            reason: buildReason({
+              problem: `0 units left.`,
+              why,
+              impact,
+            }),
+            action: buildAction(
+              speed > 0
+                ? `Reorder ${reorderQty} units now (~${speed.toFixed(1)}/day × 30 days cover).`
+                : `Reorder based on expected demand (~${reorderQty} units).`,
+              speed > 0
+                ? `Restocking earns back ~${formatCurrency(missingProfitPerDay)}/day in profit.`
+                : `Avoid losing customers to competitors.`
+            ),
             actionType: 'reorder'
           });
         }
@@ -457,6 +578,8 @@ export const AlertSvc = {
       else if (p.quantity <= p.reorderPoint) {
         const speed = getSalesSpeed(p);
         const daysLeft = speed > 0 ? Math.ceil(p.quantity / speed) : 999;
+        const reorderQty = sensibleReorderQty(p);
+        const seasonPhrase = seasonalReasonPhrase(p, season);
 
         if (isSmall) {
           alerts.push({
@@ -469,14 +592,24 @@ export const AlertSvc = {
             daysLeft
           });
         } else {
+          const why = speed > 0
+            ? `Selling ~${speed.toFixed(1)}/day. ${seasonPhrase} Stock will run out in ~${daysLeft} day(s).`.trim()
+            : `Stock is below your reorder point. ${seasonPhrase}`.trim();
           alerts.push({
             type: 'LOW_STOCK', severity: 'warning', productId: p.id, productName: p.name,
             category: 'lowstock',
             message: `${p.name} — only ${p.quantity} units left (reorder point: ${p.reorderPoint}).`,
-            reason: speed > 0
-              ? `💡 Selling ~${speed.toFixed(1)}/day. Stock runs out in ~${daysLeft} day(s).\n💸 Risk of missing sales if not restocked.`
-              : `💡 Stock below reorder point.\n💸 May run out and miss sales.`,
-            action: `👉 Reorder ${sensibleReorderQty(p)} units now`,
+            reason: buildReason({
+              problem: `Only ${p.quantity} unit(s) left.`,
+              why,
+              impact: `If stock runs out, you may miss daily sales until you restock.`,
+            }),
+            action: buildAction(
+              speed > 0
+                ? `Reorder ${reorderQty} units (~${speed.toFixed(1)}/day × 30 days cover).`
+                : `Reorder ~${reorderQty} units based on expected demand.`,
+              `Keeps sales flowing and avoids running out.`
+            ),
             actionType: 'reorder',
             daysLeft
           });
@@ -487,20 +620,40 @@ export const AlertSvc = {
       if (isSmall) return;
 
       // === OVERSTOCK ===
-      if (p.quantity > (p.reorderPoint || 10) * 5 && p.salesCount < p.quantity * 0.1) {
-        const speed = getSalesSpeed(p);
+      // Smart trigger: needs (a) significant time passed since item was added,
+      // (b) low sales activity, AND (c) stock well above reorder point.
+      const ageDays = Math.ceil((today.getTime() - new Date(p.createdAt).getTime()) / 86400000);
+      const overstockSpeed = getSalesSpeed(p);
+      if (
+        ageDays >= 7 &&
+        p.quantity > (p.reorderPoint || 10) * 5 &&
+        p.salesCount < p.quantity * 0.1 &&
+        overstockSpeed < 1
+      ) {
         const capitalBlocked = p.costPrice * p.quantity;
-        const daysToSell = speed > 0 ? Math.ceil(p.quantity / speed) : Infinity;
+        const daysToSell = overstockSpeed > 0 ? Math.ceil(p.quantity / overstockSpeed) : Infinity;
+        const seasonPhrase = seasonalReasonPhrase(p, season);
+        const whyParts = [
+          `Items are not selling and stock is high (${ageDays} day(s) old, only ${p.salesCount} unit(s) sold).`,
+        ];
+        if (seasonPhrase) whyParts.push(seasonPhrase);
+        if (overstockSpeed > 0) whyParts.push(`At current pace it will take ~${daysToSell} day(s) to clear.`);
+
         alerts.push({
           type: 'OVERSTOCK', severity: 'info', productId: p.id, productName: p.name,
           category: 'overstock',
-          message: `${p.name}: ${p.quantity} units in stock (${Math.round(p.quantity / (p.reorderPoint || 10))}x your reorder point).`,
-          reason: speed > 0
-            ? `At ${speed.toFixed(1)} units/day, will take ~${daysToSell} days to clear. ${formatCurrency(capitalBlocked)} blocked.`
-            : `No sales recorded. ${formatCurrency(capitalBlocked)} capital is stuck.`,
-          action: isLarge
-            ? `👉 Don't reorder. Apply 10-15% discount or bundle deals to free capital.`
-            : `👉 Don't reorder. Try promotion or small discount.`,
+          message: `${p.name}: ${p.quantity} units in stock (${Math.round(p.quantity / (p.reorderPoint || 10))}× your reorder point).`,
+          reason: buildReason({
+            problem: `${p.quantity} unit(s) in stock — well above what's needed.`,
+            why: whyParts.join(' '),
+            impact: `Money used to buy these items (${formatCurrency(capitalBlocked)}) is not yet returned by sales.`,
+          }),
+          action: buildAction(
+            isLarge
+              ? `Don't reorder. Apply 10–15% discount or bundle deals to move stock.`
+              : `Don't reorder. Try a promotion or small discount.`,
+            `Free up ${formatCurrency(capitalBlocked)} for items that actually sell.`
+          ),
           actionType: 'discount',
           potentialLoss: capitalBlocked
         });
@@ -511,25 +664,41 @@ export const AlertSvc = {
         const daysSinceLastSale = Math.ceil((today.getTime() - new Date(p.lastSold).getTime()) / 86400000);
         if (daysSinceLastSale > 45 && p.quantity > 0) {
           const blocked = p.costPrice * p.quantity;
+          const recoverable = Math.round(p.sellingPrice * 0.75) * p.quantity;
           alerts.push({
             type: 'DEAD_STOCK', severity: 'danger', productId: p.id, productName: p.name,
             category: 'deadstock',
             message: `${p.name}: No sale in ${daysSinceLastSale} days. ${p.quantity} units idle.`,
-            reason: `${formatCurrency(blocked)} of capital blocked. Risk grows daily.`,
-            action: `👉 Apply 20-30% discount to recover ${formatCurrency(blocked)}.`,
+            reason: buildReason({
+              problem: `No sale in ${daysSinceLastSale} days.`,
+              why: `Item has stopped moving. Money used to buy it is not coming back through sales.`,
+              impact: `Blocked money: ${formatCurrency(blocked)}. Risk grows the longer it sits.`,
+            }),
+            action: buildAction(
+              `Apply 20–30% discount or bundle with a fast-selling item.`,
+              `If discounted, you can recover around ${formatCurrency(recoverable)} instead of losing ${formatCurrency(blocked)}.`
+            ),
             actionType: 'discount',
             potentialLoss: blocked
           });
         }
         else if (daysSinceLastSale >= 15 && daysSinceLastSale <= 45 && p.quantity > 0) {
+          const blocked = p.costPrice * p.quantity;
           alerts.push({
             type: 'SLOW_MOVING', severity: 'warning', productId: p.id, productName: p.name,
             category: 'salesspeed',
             message: `${p.name}: No sale in ${daysSinceLastSale} days.`,
-            reason: `${formatCurrency(p.costPrice * p.quantity)} capital at risk of being stuck.`,
-            action: '👉 Promote with 10-15% discount or bundle.',
+            reason: buildReason({
+              problem: `No sale in ${daysSinceLastSale} days — sales are slowing.`,
+              why: seasonalReasonPhrase(p, season) || `Demand for this item has dropped recently.`,
+              impact: `${formatCurrency(blocked)} of money is at risk of getting stuck.`,
+            }),
+            action: buildAction(
+              `Promote with a 10–15% discount or bundle offer.`,
+              `Restart sales before it becomes dead stock.`
+            ),
             actionType: 'discount',
-            potentialLoss: p.costPrice * p.quantity
+            potentialLoss: blocked
           });
         }
       }
@@ -545,16 +714,24 @@ export const AlertSvc = {
         const isUnsold = (p.salesCount || 0) === 0 && daysSinceCreated >= 21;
         const isSlowAndCostly = speed > 0 && speed < 0.2 && capitalBlocked >= 10000;
         if (isExpensive && (isUnsold || isSlowAndCostly)) {
+          const recoverable = Math.round(p.sellingPrice * 0.85) * p.quantity;
           alerts.push({
             type: 'HIGH_INVESTMENT_RISK', severity: 'warning', productId: p.id, productName: p.name,
             category: 'highrisk',
             message: `${p.name}: ${formatCurrency(capitalBlocked)} tied up in ${p.quantity} unsold unit(s).`,
-            reason: isUnsold
-              ? `💡 No sales in ${daysSinceCreated} day(s). High-value stock with no movement.\n💸 Capital at risk: ${formatCurrency(capitalBlocked)}.`
-              : `💡 Selling ~${speed.toFixed(2)}/day — too slow for a high-value item.\n💸 Capital at risk: ${formatCurrency(capitalBlocked)}.`,
-            action: isLarge
-              ? `👉 Reduce reorder qty, run targeted promotion, or apply 10-15% discount to free capital.`
-              : `👉 Avoid restocking. Promote or discount to free capital.`,
+            reason: buildReason({
+              problem: isUnsold
+                ? `No sales in ${daysSinceCreated} day(s) for a high-value item.`
+                : `Selling ~${speed.toFixed(2)}/day — too slow for a high-value item.`,
+              why: `Expensive items tie up a lot of money. ${seasonalReasonPhrase(p, season)}`.trim(),
+              impact: `Money used to buy this stock (${formatCurrency(capitalBlocked)}) is not coming back.`,
+            }),
+            action: buildAction(
+              isLarge
+                ? `Reduce reorder qty, run a targeted promotion, or apply a 10–15% discount.`
+                : `Avoid restocking. Promote or apply a small discount.`,
+              `Recover around ${formatCurrency(recoverable)} and free up money for faster-selling items.`
+            ),
             actionType: 'discount',
             potentialLoss: capitalBlocked
           });
@@ -562,40 +739,43 @@ export const AlertSvc = {
       }
 
       // === SEASONAL — only for relevant categories (Electronics, Clothing, Beverages) ===
-      // Skip Hardware, Stationery, Tools and any other non-seasonal categories.
-      const month = today.getMonth();
-      const isSummer = month >= 2 && month <= 5;
-      const isWinter = month >= 10 || month <= 1;
-      const summerKeywords = ['cooler', 'fan', 'ac', 'air conditioner', 'ice', 'cold', 'juice', 'water', 'sunscreen', 'umbrella', 'lemon', 'mango', 'curd', 'lassi', 'buttermilk'];
-      const winterKeywords = ['heater', 'blanket', 'sweater', 'jacket', 'warm', 'hot chocolate', 'soup', 'tea', 'coffee'];
-      const nameLower = p.name.toLowerCase();
-      const catLower = p.category.toLowerCase();
-      const seasonalCategories = ['electronics', 'clothing', 'apparel', 'beverages', 'beverage'];
-      const seasonalAllowed = seasonalCategories.some(c => catLower.includes(c));
-
-      if (seasonalAllowed && isSummer && summerKeywords.some(k => nameLower.includes(k) || catLower.includes(k))) {
-        if (p.quantity <= p.reorderPoint * 2) {
-          alerts.push({
-            type: 'SEASONAL_DEMAND', severity: 'warning', productId: p.id, productName: p.name,
-            category: 'seasonal',
-            message: `Summer demand: ${p.name} is a seasonal hot-seller. Only ${p.quantity} units left.`,
-            reason: 'Summer increases demand for cooling/refreshment products.',
-            action: `👉 Stock up! Reorder at least ${(sensibleReorderQty(p)) * 2} units.`,
-            actionType: 'reorder'
-          });
-        }
-      }
-      if (seasonalAllowed && isWinter && winterKeywords.some(k => nameLower.includes(k) || catLower.includes(k))) {
-        if (p.quantity <= p.reorderPoint * 2) {
-          alerts.push({
-            type: 'SEASONAL_DEMAND', severity: 'warning', productId: p.id, productName: p.name,
-            category: 'seasonal',
-            message: `Winter demand: ${p.name} is a seasonal hot-seller. Only ${p.quantity} units left.`,
-            reason: 'Winter increases demand for warming products.',
-            action: `👉 Stock up! Reorder at least ${(sensibleReorderQty(p)) * 2} units.`,
-            actionType: 'reorder'
-          });
-        }
+      const seasonalDemand = getSeasonalDemand(p, season);
+      if (seasonalDemand === 'high' && p.quantity <= p.reorderPoint * 2) {
+        const reorderQty = sensibleReorderQty(p) * 2;
+        alerts.push({
+          type: 'SEASONAL_DEMAND', severity: 'warning', productId: p.id, productName: p.name,
+          category: 'seasonal',
+          message: `${season.charAt(0).toUpperCase() + season.slice(1)} demand: ${p.name} only ${p.quantity} units left.`,
+          reason: buildReason({
+            problem: `Only ${p.quantity} unit(s) left of a seasonal hot-seller.`,
+            why: `This item is in high demand during ${season}. Demand is rising due to weather and usage patterns.`,
+            impact: `Running out now means missing peak-season sales.`,
+          }),
+          action: buildAction(
+            `Stock up! Reorder at least ${reorderQty} units to cover peak demand.`,
+            `Captures peak-season profit while demand is high.`
+          ),
+          actionType: 'reorder'
+        });
+      } else if (seasonalDemand === 'low' && p.quantity > p.reorderPoint * 3) {
+        const blocked = p.costPrice * p.quantity;
+        const recoverable = Math.round(p.sellingPrice * 0.8) * p.quantity;
+        alerts.push({
+          type: 'SEASONAL_DEMAND', severity: 'info', productId: p.id, productName: p.name,
+          category: 'seasonal',
+          message: `Off-season: ${p.name} has ${p.quantity} units while demand is low.`,
+          reason: buildReason({
+            problem: `${p.quantity} unit(s) of an off-season item in stock.`,
+            why: `This item is in low demand during ${season}. Sales typically slow until the season returns.`,
+            impact: `Money used to buy this stock (${formatCurrency(blocked)}) may stay tied up for months.`,
+          }),
+          action: buildAction(
+            `Apply 15–20% off-season discount or bundle with seasonal items.`,
+            `Recover around ${formatCurrency(recoverable)} now instead of waiting months.`
+          ),
+          actionType: 'discount',
+          potentialLoss: blocked
+        });
       }
     });
 
@@ -664,31 +844,33 @@ export const AlertSvc = {
     const slowMovers = products.filter(p => p.lastSold && Math.ceil((today.getTime() - new Date(p.lastSold).getTime()) / 86400000) >= 15 && p.quantity > 0);
     const fastMovers = products.filter(p => getSalesSpeed(p) > 0).sort((a, b) => getSalesSpeed(b) - getSalesSpeed(a));
 
-    // Fast movers running low - reorder suggestion
+    // Fast movers running low - reorder suggestion (formula: avg daily sales × 30)
     fastMovers.forEach(p => {
       const speed = getSalesSpeed(p);
       const daysLeft = getDaysUntilStockout(p);
       if (daysLeft < 14 && p.quantity > 0) {
+        const qty = Math.max(sensibleReorderQty(p), Math.ceil(speed * 30));
         s.push({
           type: 'REORDER_FAST_SELLER',
           productId: p.id, productName: p.name,
-          suggestion: `${p.name} sells at ${speed.toFixed(1)} units/day and will run out in ~${daysLeft} days. Reorder ${Math.max(sensibleReorderQty(p), Math.ceil(speed * 30))} units to cover next 30 days.`,
+          suggestion: `${p.name} sells at ~${speed.toFixed(1)} units/day and will run out in ~${daysLeft} day(s). 👉 Reorder ${qty} units (~${speed.toFixed(1)}/day × 30 days cover). ✅ Keeps sales flowing for the next month.`,
           priority: daysLeft < 7 ? 'high' : 'medium'
         });
       }
     });
 
-    // Expiring items - discount + bundle strategy
+    // Expiring items - discount + bundle strategy with loss-vs-recovery framing
     expiringItems.forEach(p => {
       const d = getDaysUntilExpiry(p.expiryDate, today);
       if (d === null) return;
       const discount = d <= 3 ? 40 : d <= 7 ? 30 : d <= 14 ? 20 : 15;
       const discountedPrice = p.sellingPrice * (1 - discount / 100);
-      const profitPerUnit = discountedPrice - p.costPrice;
+      const recoverable = discountedPrice * p.quantity;
+      const fullLoss = p.costPrice * p.quantity;
       s.push({
         type: 'CLEAR_EXPIRING',
         productId: p.id, productName: p.name,
-        suggestion: `${p.name} expires in ${d} days. Apply ${discount}% discount (${formatCurrency(discountedPrice)}/unit). ${profitPerUnit >= 0 ? `You still earn ${formatCurrency(profitPerUnit)}/unit profit.` : `Small loss of ${formatCurrency(Math.abs(profitPerUnit))}/unit, but better than losing ${formatCurrency(p.costPrice)}/unit entirely.`} Consider Buy 1 Get 1 deals to move faster.`,
+        suggestion: `${p.name} expires in ${d} day(s). 👉 Apply ${discount}% discount (${formatCurrency(discountedPrice)}/unit) or run a Buy 1 Get 1 deal. ✅ If discounted, you can recover around ${formatCurrency(recoverable)} instead of losing ${formatCurrency(fullLoss)}.`,
         priority: d <= 7 ? 'high' : 'medium'
       });
     });
@@ -696,20 +878,23 @@ export const AlertSvc = {
     // Slow movers - promotion strategy
     slowMovers.forEach(p => {
       const daysSince = Math.ceil((today.getTime() - new Date(p.lastSold!).getTime()) / 86400000);
+      const blocked = p.costPrice * p.quantity;
       s.push({
         type: 'PROMOTE_SLOW_ITEM',
         productId: p.id, productName: p.name,
-        suggestion: `${p.name} hasn't sold in ${daysSince} days. Run promotional ads, place at eye-level shelves, or offer 10-15% discount. ${formatCurrency(p.costPrice * p.quantity)} capital is blocked.`,
+        suggestion: `${p.name} hasn't sold in ${daysSince} days. 👉 Promote with ads, eye-level placement, or a 10–15% discount. ✅ Restart sales before ${formatCurrency(blocked)} of money used to buy this stock gets stuck.`,
         priority: daysSince > 60 ? 'high' : 'medium'
       });
     });
 
     // Overstock - don't reorder + clear strategy
     overstocked.forEach(p => {
+      const blocked = p.costPrice * p.quantity;
+      const recoverable = Math.round(p.sellingPrice * 0.85) * p.quantity;
       s.push({
         type: 'CLEAR_OVERSTOCK',
         productId: p.id, productName: p.name,
-        suggestion: `${p.name} is overstocked (${p.quantity} units, ${Math.round(p.quantity / (p.reorderPoint || 10))}x reorder point). Do NOT reorder. Offer bundle deals, 10% discount, or advertise to clear. ${formatCurrency(p.costPrice * p.quantity)} tied up.`,
+        suggestion: `${p.name} is overstocked (${p.quantity} units, ${Math.round(p.quantity / (p.reorderPoint || 10))}× reorder point). 👉 Do NOT reorder. Offer bundle deals or 10% discount. ✅ Recover around ${formatCurrency(recoverable)} of the ${formatCurrency(blocked)} tied up.`,
         priority: 'medium'
       });
     });
@@ -717,10 +902,14 @@ export const AlertSvc = {
     // Out of stock - urgent reorder
     outOfStock.forEach(p => {
       const speed = getSalesSpeed(p);
+      const qty = sensibleReorderQty(p);
+      const missingProfitPerDay = speed * Math.max(0, p.sellingPrice - p.costPrice);
       s.push({
         type: 'URGENT_RESTOCK',
         productId: p.id, productName: p.name,
-        suggestion: `${p.name} is OUT OF STOCK! ${speed > 0 ? `Was selling ${speed.toFixed(1)} units/day. ` : ''}Reorder ${sensibleReorderQty(p)} units now to avoid losing customers.`,
+        suggestion: speed > 0
+          ? `${p.name} is OUT OF STOCK! Was selling ${speed.toFixed(1)} units/day. 👉 Reorder ${qty} units (~${speed.toFixed(1)}/day × 30 days). ✅ Restocking earns back ~${formatCurrency(missingProfitPerDay)}/day in missed profit.`
+          : `${p.name} is OUT OF STOCK! 👉 Reorder ~${qty} units based on expected demand. ✅ Avoid losing customers to competitors.`,
         priority: 'high'
       });
     });
