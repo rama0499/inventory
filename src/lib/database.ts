@@ -95,6 +95,7 @@ export interface Alert {
   discountPercent?: number;
   batchId?: string;
   batchQty?: number;
+  seasonTag?: 'high-demand' | 'low-demand';
 }
 
 export interface Suggestion {
