@@ -57,6 +57,14 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
   const [confirmRemove, setConfirmRemove] = useState<{ product: Product; alert?: Alert } | null>(null);
   const [discountDialog, setDiscountDialog] = useState<{ product: Product; alert?: Alert; percent: string } | null>(null);
   const [removeProductDialog, setRemoveProductDialog] = useState<{ product: Product; mode: 'all' | 'partial'; qty: string } | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<'org' | 'account' | 'security' | 'danger'>('org');
+  const [orgEdit, setOrgEdit] = useState({ name: business.name, type: business.type, address: business.address, phone: business.phone, currency: business.currency, gstin: business.gstin });
+  const [pwdEdit, setPwdEdit] = useState({ old: '', next: '', confirm: '', show: false });
+  const [keyEdit, setKeyEdit] = useState({ password: '', newKey: '', show: false });
+  const [deleteConfirm, setDeleteConfirm] = useState({ password: '', text: '', show: false });
+  const [settingsErr, setSettingsErr] = useState('');
+  const [settingsOk, setSettingsOk] = useState('');
 
   const refresh = useCallback(() => {
     const p = Inv.get(business.id);
