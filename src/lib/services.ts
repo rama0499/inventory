@@ -320,7 +320,7 @@ export const OrgSvc = {
     if (!u) return { error: 'User not found.' };
     if (u.password !== oldPassword) return { error: 'Current password is incorrect.' };
     if (!newPassword || newPassword.length < 6) return { error: 'New password must be at least 6 characters.' };
-    DB.update('users', userId, { password: newPassword });
+    DB.update<User>('users', userId, { password: newPassword } as Partial<User>);
     return { ok: true };
   },
   changeSecretKey: (orgId: string, userId: string, password: string, newKey: string) => {
@@ -329,7 +329,7 @@ export const OrgSvc = {
     const org = DB.findOne<Organization>('businesses', o => o.id === orgId);
     if (!org) return { error: 'Organization not found.' };
     if (org.ownerId !== userId) return { error: 'Only the owner can change the secret key.' };
-    DB.update('businesses', orgId, { secretKey: newKey, shared: Boolean(newKey) });
+    DB.update<Organization>('businesses', orgId, { secretKey: newKey, shared: Boolean(newKey) } as Partial<Organization>);
     return { ok: true };
   },
   // Full destructive delete — org + its products + sales + action logs.
