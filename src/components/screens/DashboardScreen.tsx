@@ -241,7 +241,41 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
     setReorderProduct(null); setReorderForm({ qty: '', expiryDate: '' }); refresh();
   };
 
-  const modeLabel = mode === 'small' ? '🏪 Small Business' : mode === 'medium' ? '🏢 Medium Business' : '🏭 Enterprise';
+  // === SETTINGS HANDLERS ===
+  const saveOrgDetails = () => {
+    setSettingsErr(''); setSettingsOk('');
+    if (!orgEdit.name.trim()) { setSettingsErr('Organization name cannot be empty.'); return; }
+    const r = OrgSvc.update(business.id, user.id, orgEdit);
+    if (r.error) { setSettingsErr(r.error); return; }
+    setSettingsOk('✅ Organization details updated successfully.');
+    if (r.org) onOrgUpdated?.(r.org);
+  };
+  const savePassword = () => {
+    setSettingsErr(''); setSettingsOk('');
+    if (!pwdEdit.old || !pwdEdit.next) { setSettingsErr('All fields required.'); return; }
+    if (pwdEdit.next !== pwdEdit.confirm) { setSettingsErr('New password and confirm do not match.'); return; }
+    const r = OrgSvc.changePassword(user.id, pwdEdit.old, pwdEdit.next);
+    if (r.error) { setSettingsErr(r.error); return; }
+    setSettingsOk('✅ Password changed successfully.');
+    setPwdEdit({ old: '', next: '', confirm: '', show: false });
+  };
+  const saveSecretKey = () => {
+    setSettingsErr(''); setSettingsOk('');
+    if (!keyEdit.password) { setSettingsErr('Account password is required to change the secret key.'); return; }
+    const r = OrgSvc.changeSecretKey(business.id, user.id, keyEdit.password, keyEdit.newKey);
+    if (r.error) { setSettingsErr(r.error); return; }
+    setSettingsOk(keyEdit.newKey ? '✅ Secret key updated. Organization is now shareable.' : '✅ Secret key cleared.');
+    setKeyEdit({ password: '', newKey: '', show: false });
+  };
+  const confirmDeleteOrg = () => {
+    setSettingsErr(''); setSettingsOk('');
+    if (deleteConfirm.text.trim().toUpperCase() !== 'DELETE') { setSettingsErr('Type DELETE to confirm.'); return; }
+    if (!deleteConfirm.password) { setSettingsErr('Account password required.'); return; }
+    const r = OrgSvc.delete(business.id, user.id, deleteConfirm.password);
+    if (r.error) { setSettingsErr(r.error); return; }
+    setSettingsOpen(false);
+    onOrgDeleted?.();
+  };
   const isSmall = mode === 'small';
   const showAnalytics = mode === 'medium' || mode === 'large';
   const showFinancials = mode === 'large';
