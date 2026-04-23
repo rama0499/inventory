@@ -820,7 +820,9 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
                             <div className="flex-1">
                               <div className="flex items-center gap-2 mb-1">
                                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${a.severity === 'danger' ? 'bg-destructive/20 text-destructive' : a.severity === 'warning' ? 'bg-warning/20 text-warning' : 'bg-info/20 text-info'}`}>{a.severity === 'danger' ? '🔴' : a.severity === 'warning' ? '🟡' : '🔵'} {a.type.replace(/_/g, ' ')}</span>
-                                {a.daysLeft !== undefined && a.daysLeft > 0 && <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${a.daysLeft <= 3 ? 'bg-destructive/20 text-destructive' : 'bg-warning/20 text-warning'}`}>⏰ {a.daysLeft}d</span>}
+                                {a.daysLeft !== undefined && a.daysLeft > 0 && a.daysLeft < 999 && <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${a.daysLeft <= 3 ? 'bg-destructive/20 text-destructive' : 'bg-warning/20 text-warning'}`}>⏰ {a.daysLeft}d</span>}
+                                {a.seasonTag === 'high-demand' && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-accent/20 text-accent border border-accent/30">🔥 In-Season</span>}
+                                {a.seasonTag === 'low-demand' && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-warning/20 text-warning border border-warning/30">❄️ Off-Season</span>}
                               </div>
                               <p className="text-foreground/80 text-sm font-medium">{a.message}</p>
                               {a.reason && <p className="text-foreground/60 text-xs mt-1.5 border-l-2 border-muted-foreground/20 pl-2 whitespace-pre-line">{a.reason}</p>}
