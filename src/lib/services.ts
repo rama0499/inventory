@@ -787,6 +787,40 @@ export const AlertSvc = {
         });
       }
 
+      // === SAME-DAY REORDER OVERSTOCK WARNING ===
+      // Triggered when user reorders the same item 2+ times today AND no sales have happened.
+      const reorderToday = ReorderTracker.todayCount(p.businessId, p.id);
+      if (reorderToday >= 2 && p.salesCount === 0 && p.quantity > 0) {
+        const capitalAtRisk = p.costPrice * p.quantity;
+        const sDemand = getSeasonalDemand(p, season);
+        let why = 'Stock is being increased without any sales. Wait and observe sales before ordering more.';
+        let action = 'Pause reordering. Wait at least a few days to see how this item actually sells.';
+        if (sDemand === 'low') {
+          why = 'This item is not selling and stock is increasing. Demand is low this season — you may face loss if items remain unsold.';
+          action = 'Stop reordering. Try a small discount or wait until demand returns.';
+        } else if (sDemand === 'high') {
+          why = 'Demand is high, but ordering too much at once may block your money. Consider ordering in smaller batches (weekly/monthly).';
+          action = 'Switch to smaller weekly orders instead of bulk. Match supply to actual sales.';
+        }
+        alerts.push({
+          type: 'REPEAT_REORDER', severity: 'warning', productId: p.id, productName: p.name,
+          category: 'overstock',
+          message: `${p.name}: reordered ${reorderToday}× today with no sales yet.`,
+          reason: buildReason({
+            problem: `Stock increased ${reorderToday} times today, but 0 sales recorded.`,
+            why,
+            impact: `Money used to buy these items (${formatCurrency(capitalAtRisk)}) is sitting idle.`,
+          }),
+          action: buildAction(
+            action,
+            `Avoid blocking money in stock that isn't proven to sell.`
+          ),
+          actionType: 'discount',
+          potentialLoss: capitalAtRisk,
+          seasonTag: sDemand === 'high' ? 'high-demand' : sDemand === 'low' ? 'low-demand' : undefined,
+        });
+      }
+
       // === DEAD STOCK (>45 days no sale) ===
       if (p.lastSold) {
         const daysSinceLastSale = Math.ceil((today.getTime() - new Date(p.lastSold).getTime()) / 86400000);
