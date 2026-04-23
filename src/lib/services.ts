@@ -382,18 +382,24 @@ function sensibleReorderQty(p: Product, coverDays = 30): number {
 
 // === CATEGORY CLASSIFIER ===
 // Maps any free-text category/name to a behavior bucket so reasoning can adapt.
-export type CategoryClass = 'food' | 'pharmacy' | 'cosmetics' | 'beverages' | 'clothing' | 'electronics' | 'generic';
+// 'staple' = daily essentials (salt, rice, sugar, flour) — long shelf life, NOT seasonal,
+// no health/malfunction reasoning. Treated as plain stock.
+export type CategoryClass = 'food' | 'pharmacy' | 'cosmetics' | 'beverages' | 'clothing' | 'electronics' | 'staple' | 'generic';
 
 export function classifyCategory(p: Pick<Product, 'category' | 'name'>): CategoryClass {
   const c = (p.category || '').toLowerCase();
   const n = (p.name || '').toLowerCase();
   const has = (k: string) => c.includes(k) || n.includes(k);
+  // Staples first — daily essentials with long shelf life. Never apply seasonal/perishable reasoning.
+  if (['salt', 'rice', 'sugar', 'flour', 'atta', 'dal', 'lentil', 'pulse', 'wheat'].some(has)) return 'staple';
   if (['medicine', 'pharma', 'health', 'supplement', 'tablet', 'syrup', 'drug'].some(has)) return 'pharmacy';
-  if (['food', 'dairy', 'bakery', 'snack', 'grocery', 'grain', 'cereal', 'oil', 'spice', 'instant food', 'breakfast'].some(has)) return 'food';
-  if (['cosmetic', 'beauty', 'skincare', 'personal care'].some(has)) return 'cosmetics';
-  if (['beverage', 'drink', 'juice', 'water', 'soda', 'cola', 'tea', 'coffee'].some(has)) return 'beverages';
-  if (['clothing', 'apparel', 'wear', 'shirt', 'jeans', 'jacket', 'sweater', 'dress'].some(has)) return 'clothing';
-  if (['electronic', 'gadget', 'appliance', 'ac', 'cooler', 'fan', 'heater', 'tv', 'mobile', 'laptop'].some(has)) return 'electronics';
+  if (['dairy', 'milk', 'curd', 'yogurt', 'cheese', 'butter', 'paneer', 'bakery', 'bread', 'snack', 'biscuit', 'chips', 'instant food', 'breakfast', 'meat', 'fish', 'egg', 'fruit', 'vegetable'].some(has)) return 'food';
+  if (['cosmetic', 'beauty', 'skincare', 'personal care', 'lotion', 'cream', 'shampoo'].some(has)) return 'cosmetics';
+  if (['beverage', 'drink', 'juice', 'soda', 'cola', 'lemonade', 'tea', 'coffee'].some(has)) return 'beverages';
+  if (['clothing', 'apparel', 'wear', 'shirt', 'jeans', 'jacket', 'sweater', 'dress', 't-shirt', 'shorts'].some(has)) return 'clothing';
+  if (['electronic', 'gadget', 'appliance', 'ac', 'cooler', 'fan', 'heater', 'tv', 'mobile', 'laptop', 'air conditioner'].some(has)) return 'electronics';
+  // Generic 'food'/'grocery' label without specifics → treat as staple to be safe (no health-risk wording)
+  if (['grocery', 'food', 'grain', 'cereal', 'oil', 'spice'].some(has)) return 'staple';
   return 'generic';
 }
 
@@ -506,12 +512,13 @@ export const AlertSvc = {
           if (cls === 'pharmacy') {
             why = 'Illegal to sell expired medicine. May lead to penalties and loss of customer trust.';
           } else if (cls === 'food' || cls === 'beverages') {
-            why = 'Health risk — may cause food poisoning and damage your shop reputation.';
+            why = 'May affect customer health and cannot be sold after expiry. Damages your shop reputation.';
           } else if (cls === 'cosmetics') {
             why = 'May cause skin reactions. Selling expired beauty products hurts customer trust.';
           } else if (cls === 'electronics') {
-            why = 'Risk of leakage or malfunction. Selling can lead to returns and bad reviews.';
+            why = 'Risk of malfunction or damage. Selling can lead to returns and bad reviews.';
           }
+          // Note: 'staple' and 'clothing' rarely reach here (no expiry); fall back to generic 'why'.
           // Missed-opportunity note when item is in high seasonal demand
           const expDemand = getSeasonalDemand(p, season);
           let missedOpportunity = '';
