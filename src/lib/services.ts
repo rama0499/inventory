@@ -512,12 +512,13 @@ export const AlertSvc = {
           if (cls === 'pharmacy') {
             why = 'Illegal to sell expired medicine. May lead to penalties and loss of customer trust.';
           } else if (cls === 'food' || cls === 'beverages') {
-            why = 'Health risk — may cause food poisoning and damage your shop reputation.';
+            why = 'May affect customer health and cannot be sold after expiry. Damages your shop reputation.';
           } else if (cls === 'cosmetics') {
             why = 'May cause skin reactions. Selling expired beauty products hurts customer trust.';
           } else if (cls === 'electronics') {
-            why = 'Risk of leakage or malfunction. Selling can lead to returns and bad reviews.';
+            why = 'Risk of malfunction or damage. Selling can lead to returns and bad reviews.';
           }
+          // Note: 'staple' and 'clothing' rarely reach here (no expiry); fall back to generic 'why'.
           // Missed-opportunity note when item is in high seasonal demand
           const expDemand = getSeasonalDemand(p, season);
           let missedOpportunity = '';
