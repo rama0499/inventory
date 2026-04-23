@@ -1,15 +1,16 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Inv, AlertSvc, Analytics, ActionHistory, playAlertSound, stopAlertSound, formatCurrency, formatDisplayDate, getSalesSpeed, getDaysUntilStockout } from '@/lib/services';
+import { Inv, AlertSvc, Analytics, ActionHistory, OrgSvc, playAlertSound, stopAlertSound, formatCurrency, formatDisplayDate, getSalesSpeed, getDaysUntilStockout } from '@/lib/services';
 import type { User, Organization, BusinessMode, Product, Alert, Suggestion, ActionLog } from '@/lib/database';
-import { CATEGORIES, UNITS } from '@/lib/database';
+import { CATEGORIES, UNITS, BUSINESS_TYPES, CURRENCIES } from '@/lib/database';
 import { compareExpiryDates, getDaysUntilExpiry, parseInventoryCsvText } from '@/lib/inventory-utils';
 import {
   LayoutDashboard, Package, Bell, Lightbulb, BarChart3, DollarSign,
   LogOut, Search, Plus, FileText, Upload, X, Check,
   AlertTriangle, TrendingDown, Clock, ShoppingCart,
   RefreshCw, Volume2, Menu, Tag, Truck, TrendingUp, Zap, ArrowLeft,
-  Skull, Timer, PackageOpen, Gauge, Sun, History, Trash2, MinusCircle
+  Skull, Timer, PackageOpen, Gauge, Sun, History, Trash2, MinusCircle,
+  Settings as SettingsIcon, Eye, EyeOff, KeyRound, Edit3
 } from 'lucide-react';
 
 interface Props {
@@ -18,12 +19,14 @@ interface Props {
   mode: BusinessMode;
   onLogout: () => void;
   onBackToModeSelect: () => void;
+  onOrgDeleted?: () => void;
+  onOrgUpdated?: (org: Organization) => void;
 }
 
 type Tab = 'overview' | 'inventory' | 'alerts' | 'suggestions' | 'analytics' | 'financials' | 'history';
 type AlertCategory = 'all' | 'expired' | 'expiring' | 'lowstock' | 'outofstock' | 'overstock' | 'salesspeed' | 'seasonal' | 'deadstock' | 'highrisk';
 
-export default function DashboardScreen({ user, business, mode, onLogout, onBackToModeSelect }: Props) {
+export default function DashboardScreen({ user, business, mode, onLogout, onBackToModeSelect, onOrgDeleted, onOrgUpdated }: Props) {
   const [tab, setTab] = useState<Tab>('overview');
   const [products, setProducts] = useState<Product[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
