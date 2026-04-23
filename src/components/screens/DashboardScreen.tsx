@@ -453,19 +453,34 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
       {/* SETTINGS DIALOG */}
       <AnimatePresence>
         {settingsOpen && (
-          <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-background/70 backdrop-blur-sm z-[60]" onClick={() => { setSettingsOpen(false); setSettingsErr(''); setSettingsOk(''); }} />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[61] glass p-0 max-w-2xl w-[95%] max-h-[90vh] overflow-hidden flex flex-col">
-              <div className="flex items-center justify-between border-b border-border px-5 py-3">
-                <h3 className="text-base font-bold text-primary flex items-center gap-2"><SettingsIcon size={16} /> Organization Settings</h3>
-                <button onClick={() => { setSettingsOpen(false); setSettingsErr(''); setSettingsOk(''); }} className="text-muted-foreground hover:text-foreground"><X size={16} /></button>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] bg-background/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
+            onClick={() => { setSettingsOpen(false); setSettingsErr(''); setSettingsOk(''); }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-title"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 8 }}
+              transition={{ duration: 0.18 }}
+              onClick={e => e.stopPropagation()}
+              className="relative glass p-0 w-full max-w-3xl my-auto max-h-[calc(100vh-2rem)] flex flex-col shadow-2xl"
+            >
+              <div className="flex items-center justify-between border-b border-border px-5 py-3 shrink-0">
+                <h3 id="settings-title" className="text-base font-bold text-primary flex items-center gap-2"><SettingsIcon size={16} /> Organization Settings</h3>
+                <button onClick={() => { setSettingsOpen(false); setSettingsErr(''); setSettingsOk(''); }} className="text-muted-foreground hover:text-foreground" aria-label="Close settings"><X size={16} /></button>
               </div>
-              <div className="flex gap-1 px-3 pt-3 border-b border-border overflow-x-auto">
+              <div className="flex gap-1 px-3 pt-3 border-b border-border overflow-x-auto shrink-0">
                 {([['org','🏢 Organization'],['account','🔑 Account'],['security','🛡️ Security'],['danger','⚠️ Danger Zone']] as const).map(([id,label]) => (
                   <button key={id} onClick={() => { setSettingsTab(id); setSettingsErr(''); setSettingsOk(''); }} className={`px-3 py-2 text-xs font-bold rounded-t-lg whitespace-nowrap transition-all ${settingsTab === id ? 'bg-primary/10 text-primary border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}`}>{label}</button>
                 ))}
               </div>
-              <div className="p-5 overflow-y-auto flex-1">
+              <div className="p-5 overflow-y-auto flex-1 min-h-0">
                 {settingsErr && <div className="bg-destructive/10 border border-destructive/30 rounded-xl p-2 text-destructive text-xs mb-3">⚠ {settingsErr}</div>}
                 {settingsOk && <div className="bg-accent/10 border border-accent/30 rounded-xl p-2 text-accent text-xs mb-3">{settingsOk}</div>}
 
@@ -480,7 +495,7 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
                       <div><label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">GSTIN</label><input value={orgEdit.gstin} onChange={e => setOrgEdit(o => ({ ...o, gstin: e.target.value }))} className={inputCls} /></div>
                       <div><label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Currency</label><select value={orgEdit.currency} onChange={e => setOrgEdit(o => ({ ...o, currency: e.target.value }))} className={inputCls}>{CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
                     </div>
-                    <div className="flex gap-2 pt-2">
+                    <div className="flex flex-wrap gap-2 pt-2">
                       <button onClick={saveOrgDetails} className="bg-primary/15 border border-primary/30 text-primary font-bold py-2 px-5 rounded-xl text-sm hover:bg-primary/25 flex items-center gap-2"><Check size={14} /> Save Changes</button>
                       <button onClick={() => setOrgEdit({ name: business.name, type: business.type, address: business.address, phone: business.phone, currency: business.currency, gstin: business.gstin })} className="bg-muted/30 border border-border text-muted-foreground font-bold py-2 px-5 rounded-xl text-sm hover:bg-muted/50">Cancel</button>
                     </div>
@@ -497,7 +512,7 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
                       </div>
                       <div><label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">New Password (min 6)</label><input type={pwdEdit.show ? 'text' : 'password'} value={pwdEdit.next} onChange={e => setPwdEdit(p => ({ ...p, next: e.target.value }))} className={inputCls} /></div>
                       <div><label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Confirm New Password</label><input type={pwdEdit.show ? 'text' : 'password'} value={pwdEdit.confirm} onChange={e => setPwdEdit(p => ({ ...p, confirm: e.target.value }))} className={inputCls} /></div>
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2">
                         <button onClick={savePassword} className="bg-primary/15 border border-primary/30 text-primary font-bold py-2 px-5 rounded-xl text-sm hover:bg-primary/25 flex items-center gap-2"><Check size={14} /> Change Password</button>
                         <button onClick={() => setPwdEdit({ old: '', next: '', confirm: '', show: false })} className="bg-muted/30 border border-border text-muted-foreground font-bold py-2 px-5 rounded-xl text-sm hover:bg-muted/50">Cancel</button>
                       </div>
@@ -514,7 +529,7 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
                         <label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">New Secret Key {!keyEdit.newKey && <span className="text-muted-foreground/60 normal-case">(empty = disable sharing)</span>}</label>
                         <div className="relative"><input type={keyEdit.show ? 'text' : 'password'} value={keyEdit.newKey} onChange={e => setKeyEdit(k => ({ ...k, newKey: e.target.value }))} className={inputCls + ' pr-9'} /><button type="button" onClick={() => setKeyEdit(k => ({ ...k, show: !k.show }))} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">{keyEdit.show ? <EyeOff size={14} /> : <Eye size={14} />}</button></div>
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2">
                         <button onClick={saveSecretKey} className="bg-primary/15 border border-primary/30 text-primary font-bold py-2 px-5 rounded-xl text-sm hover:bg-primary/25 flex items-center gap-2"><KeyRound size={14} /> Update Secret Key</button>
                         <button onClick={() => setKeyEdit({ password: '', newKey: '', show: false })} className="bg-muted/30 border border-border text-muted-foreground font-bold py-2 px-5 rounded-xl text-sm hover:bg-muted/50">Cancel</button>
                       </div>
@@ -533,7 +548,7 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
                           <div className="relative"><input type={deleteConfirm.show ? 'text' : 'password'} value={deleteConfirm.password} onChange={e => setDeleteConfirm(d => ({ ...d, password: e.target.value }))} className={inputCls + ' pr-9'} /><button type="button" onClick={() => setDeleteConfirm(d => ({ ...d, show: !d.show }))} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">{deleteConfirm.show ? <EyeOff size={14} /> : <Eye size={14} />}</button></div>
                         </div>
                         <div><label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Type <span className="text-destructive">DELETE</span> to confirm</label><input value={deleteConfirm.text} onChange={e => setDeleteConfirm(d => ({ ...d, text: e.target.value }))} placeholder="DELETE" className={inputCls + ' font-mono'} /></div>
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap gap-2">
                           <button onClick={confirmDeleteOrg} className="bg-destructive/20 border border-destructive/40 text-destructive font-bold py-2 px-5 rounded-xl text-sm hover:bg-destructive/30 flex items-center gap-2"><Trash2 size={14} /> Confirm Delete</button>
                           <button onClick={() => setDeleteConfirm({ password: '', text: '', show: false })} className="bg-muted/30 border border-border text-muted-foreground font-bold py-2 px-5 rounded-xl text-sm hover:bg-muted/50">Cancel</button>
                         </div>
@@ -543,7 +558,7 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
                 )}
               </div>
             </motion.div>
-          </>
+          </motion.div>
         )}
       </AnimatePresence>
 
