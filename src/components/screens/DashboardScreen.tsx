@@ -276,6 +276,8 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
     setSettingsOpen(false);
     onOrgDeleted?.();
   };
+
+  const modeLabel = mode === 'small' ? '🏪 Small Business' : mode === 'medium' ? '🏢 Medium Business' : '🏭 Enterprise';
   const isSmall = mode === 'small';
   const showAnalytics = mode === 'medium' || mode === 'large';
   const showFinancials = mode === 'large';
