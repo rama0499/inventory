@@ -248,6 +248,112 @@ export const ActionHistory = {
   }
 };
 
+// === REORDER TRACKER ===
+// Tracks how many times a product was reordered today (per business).
+// Used to detect over-eager reordering when no sales have happened.
+const REORDER_KEY = 'srsis_reorder_tracker';
+type ReorderMap = Record<string, Record<string, { date: string; count: number }>>;
+
+export const ReorderTracker = {
+  read(): ReorderMap {
+    try { return JSON.parse(localStorage.getItem(REORDER_KEY) || '{}'); }
+    catch { return {}; }
+  },
+  write(data: ReorderMap) {
+    try { localStorage.setItem(REORDER_KEY, JSON.stringify(data)); } catch { /* noop */ }
+  },
+  todayKey(): string {
+    const d = new Date();
+    return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+  },
+  record(bizId: string, productId: string) {
+    const data = this.read();
+    const today = this.todayKey();
+    data[bizId] = data[bizId] || {};
+    const entry = data[bizId][productId];
+    if (entry && entry.date === today) {
+      entry.count += 1;
+    } else {
+      data[bizId][productId] = { date: today, count: 1 };
+    }
+    this.write(data);
+  },
+  // How many times product was reordered today
+  todayCount(bizId: string, productId: string): number {
+    const data = this.read();
+    const today = this.todayKey();
+    const entry = data[bizId]?.[productId];
+    if (!entry || entry.date !== today) return 0;
+    return entry.count;
+  },
+  clear(bizId: string) {
+    const data = this.read();
+    delete data[bizId];
+    this.write(data);
+  }
+};
+
+// === ORGANIZATION SERVICE ===
+// Owner-only updates and full delete (org + products + sales + logs).
+export const OrgSvc = {
+  update: (orgId: string, userId: string, updates: Partial<Organization>) => {
+    const org = DB.findOne<Organization>('businesses', o => o.id === orgId);
+    if (!org) return { error: 'Organization not found.' };
+    if (org.ownerId !== userId) return { error: 'Only the owner can update this organization.' };
+    // Whitelist editable fields — never let UI overwrite ownerId/mode/createdAt/id
+    const safe: Partial<Organization> = {};
+    if (updates.name !== undefined) safe.name = String(updates.name).trim();
+    if (updates.type !== undefined) safe.type = updates.type;
+    if (updates.address !== undefined) safe.address = updates.address;
+    if (updates.phone !== undefined) safe.phone = updates.phone;
+    if (updates.gstin !== undefined) safe.gstin = updates.gstin;
+    if (updates.currency !== undefined) safe.currency = updates.currency;
+    if (updates.warehouse !== undefined) safe.warehouse = updates.warehouse;
+    if (updates.shared !== undefined) safe.shared = updates.shared;
+    if (updates.secretKey !== undefined) safe.secretKey = updates.secretKey;
+    if (!safe.name) delete safe.name; // don't blank name
+    const updated = DB.update<Organization>('businesses', orgId, safe);
+    return { org: updated };
+  },
+  changePassword: (userId: string, oldPassword: string, newPassword: string) => {
+    const u = DB.findOne<{ id: string; password: string }>('users', x => x.id === userId);
+    if (!u) return { error: 'User not found.' };
+    if (u.password !== oldPassword) return { error: 'Current password is incorrect.' };
+    if (!newPassword || newPassword.length < 6) return { error: 'New password must be at least 6 characters.' };
+    DB.update('users', userId, { password: newPassword });
+    return { ok: true };
+  },
+  changeSecretKey: (orgId: string, userId: string, password: string, newKey: string) => {
+    const u = DB.findOne<{ id: string; password: string }>('users', x => x.id === userId);
+    if (!u || u.password !== password) return { error: 'Password is incorrect.' };
+    const org = DB.findOne<Organization>('businesses', o => o.id === orgId);
+    if (!org) return { error: 'Organization not found.' };
+    if (org.ownerId !== userId) return { error: 'Only the owner can change the secret key.' };
+    DB.update('businesses', orgId, { secretKey: newKey, shared: Boolean(newKey) });
+    return { ok: true };
+  },
+  // Full destructive delete — org + its products + sales + action logs.
+  // Does NOT touch other organizations of the same user.
+  delete: (orgId: string, userId: string, password: string) => {
+    const u = DB.findOne<{ id: string; password: string }>('users', x => x.id === userId);
+    if (!u || u.password !== password) return { error: 'Password is incorrect.' };
+    const org = DB.findOne<Organization>('businesses', o => o.id === orgId);
+    if (!org) return { error: 'Organization not found.' };
+    if (org.ownerId !== userId) return { error: 'Only the owner can delete this organization.' };
+
+    // Cascade: products, sales, action_logs scoped to this org only
+    const products = DB.findMany<Product>('products', p => p.businessId === orgId);
+    products.forEach(p => DB.del<Product>('products', p.id));
+    const sales = DB.findMany<Sale>('sales', s => s.businessId === orgId);
+    sales.forEach(s => DB.del<Sale>('sales', s.id));
+    const logs = DB.findMany<ActionLog>('action_logs', a => a.businessId === orgId);
+    logs.forEach(l => DB.del<ActionLog>('action_logs', l.id));
+    DB.del<Organization>('businesses', orgId);
+    ReorderTracker.clear(orgId);
+    return { ok: true };
+  }
+};
+
 // Helper: sales speed
 export function getSalesSpeed(p: Product): number {
   if (!p.salesCount || p.salesCount === 0) return 0;
