@@ -1,4 +1,4 @@
-import DB, { type Product, type Alert, type Suggestion, type Sale, type ActionLog, type Batch, type BusinessMode } from './database';
+import DB, { type Product, type Alert, type Suggestion, type Sale, type ActionLog, type Batch, type BusinessMode, type Organization, type User } from './database';
 import { getDaysUntilExpiry, normalizeExpiryDate, parseExpiryDate } from './inventory-utils';
 
 function sanitizeProductInput(p: Partial<Product>): Partial<Product> {
