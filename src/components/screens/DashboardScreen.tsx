@@ -595,7 +595,8 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
                 </button>
               ))}
             </div>
-            <button onClick={() => refresh()} className="text-muted-foreground hover:text-primary transition-colors"><RefreshCw size={16} /></button>
+            <button onClick={() => refresh()} className="text-muted-foreground hover:text-primary transition-colors" title="Refresh"><RefreshCw size={16} /></button>
+            <button onClick={() => { setSettingsOpen(true); setSettingsErr(''); setSettingsOk(''); }} className="text-muted-foreground hover:text-primary transition-colors" title="Settings"><SettingsIcon size={16} /></button>
             <button onClick={() => { setTab('alerts'); if (alerts.length > 0) playAlertSound(); }} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${dangerCount > 0 ? 'bg-destructive/10 border-destructive/30 text-destructive animate-pulse-glow' : warnCount > 0 ? 'bg-warning/10 border-warning/30 text-warning' : 'bg-muted/30 border-border text-muted-foreground'}`}>
               <Bell size={14} />{alerts.length > 0 && <span>{alerts.length}</span>}
             </button>
