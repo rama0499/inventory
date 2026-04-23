@@ -212,6 +212,8 @@ export const Inv = {
     if (!p) return { error: 'Product not found.' };
     const batches = [...getProductBatches(p), makeBatch(qty, expiryDate)];
     const recomputed = recomputeProductFromBatches({ ...p, batches } as Product);
+    // Track reorder event for same-day overstock detection
+    ReorderTracker.record(p.businessId, id);
     return DB.update<Product>('products', id, recomputed);
   },
   deleteProduct: (id: string) => {
