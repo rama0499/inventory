@@ -901,43 +901,88 @@ export const AlertSvc = {
       }
 
       // === SEASONAL — only for relevant categories (Electronics, Clothing, Beverages) ===
+      // Always emits BOTH high-demand and low-demand info so the user can see seasonal balance.
       const seasonalDemand = getSeasonalDemand(p, season);
-      if (seasonalDemand === 'high' && p.quantity <= p.reorderPoint * 2) {
+      if (seasonalDemand === 'high') {
+        // High demand: tell user it's in season. Push harder if stock is also low.
+        const isLowStock = p.quantity <= p.reorderPoint * 2;
         const reorderQty = sensibleReorderQty(p) * 2;
-        alerts.push({
-          type: 'SEASONAL_DEMAND', severity: 'warning', productId: p.id, productName: p.name,
-          category: 'seasonal',
-          message: `${season.charAt(0).toUpperCase() + season.slice(1)} demand: ${p.name} only ${p.quantity} units left.`,
-          reason: buildReason({
-            problem: `Only ${p.quantity} unit(s) left of a seasonal hot-seller.`,
-            why: `This item is in high demand during ${season}. Demand is rising due to weather and usage patterns.`,
-            impact: `Running out now means missing peak-season sales.`,
-          }),
-          action: buildAction(
-            `Stock up! Reorder at least ${reorderQty} units to cover peak demand.`,
-            `Captures peak-season profit while demand is high.`
-          ),
-          actionType: 'reorder'
-        });
-      } else if (seasonalDemand === 'low' && p.quantity > p.reorderPoint * 3) {
-        const blocked = p.costPrice * p.quantity;
-        const recoverable = Math.round(p.sellingPrice * 0.8) * p.quantity;
-        alerts.push({
-          type: 'SEASONAL_DEMAND', severity: 'info', productId: p.id, productName: p.name,
-          category: 'seasonal',
-          message: `Off-season: ${p.name} has ${p.quantity} units while demand is low.`,
-          reason: buildReason({
-            problem: `${p.quantity} unit(s) of an off-season item in stock.`,
-            why: `This item is in low demand during ${season}. Sales typically slow until the season returns.`,
-            impact: `Money used to buy this stock (${formatCurrency(blocked)}) may stay tied up for months.`,
-          }),
-          action: buildAction(
-            `Apply 15–20% off-season discount or bundle with seasonal items.`,
-            `Recover around ${formatCurrency(recoverable)} now instead of waiting months.`
-          ),
-          actionType: 'discount',
-          potentialLoss: blocked
-        });
+        if (isLowStock) {
+          alerts.push({
+            type: 'SEASONAL_DEMAND', severity: 'warning', productId: p.id, productName: p.name,
+            category: 'seasonal',
+            message: `🔥 ${season.charAt(0).toUpperCase() + season.slice(1)} hot-seller: ${p.name} only ${p.quantity} units left.`,
+            reason: buildReason({
+              problem: `Only ${p.quantity} unit(s) left of a seasonal hot-seller.`,
+              why: `This item is in high demand during ${season}. Sales may be faster than usual due to weather and usage patterns.`,
+              impact: `Running out now means missing peak-season sales.`,
+            }),
+            action: buildAction(
+              `Stock up! Reorder at least ${reorderQty} units to cover peak demand.`,
+              `Captures peak-season profit while demand is high.`
+            ),
+            actionType: 'reorder',
+            seasonTag: 'high-demand',
+          });
+        } else {
+          alerts.push({
+            type: 'SEASONAL_HIGH', severity: 'info', productId: p.id, productName: p.name,
+            category: 'seasonal',
+            message: `🔥 ${p.name} is in high demand this ${season}.`,
+            reason: buildReason({
+              problem: `Seasonal hot-seller in your inventory (${p.quantity} units).`,
+              why: `This item is in high demand during ${season}. Sales may be faster than usual.`,
+              impact: `Don't let stock run out — peak-season profit at stake.`,
+            }),
+            action: buildAction(
+              `Keep stock healthy. Watch sales speed and reorder before running low.`,
+              `Captures peak-season demand without missing customers.`
+            ),
+            actionType: 'reorder',
+            seasonTag: 'high-demand',
+          });
+        }
+      } else if (seasonalDemand === 'low') {
+        // Low demand: warn against overstocking.
+        const isOverstock = p.quantity > p.reorderPoint * 3;
+        if (isOverstock) {
+          const blocked = p.costPrice * p.quantity;
+          const recoverable = Math.round(p.sellingPrice * 0.8) * p.quantity;
+          alerts.push({
+            type: 'SEASONAL_DEMAND', severity: 'info', productId: p.id, productName: p.name,
+            category: 'seasonal',
+            message: `❄️ Off-season: ${p.name} has ${p.quantity} units while demand is low.`,
+            reason: buildReason({
+              problem: `${p.quantity} unit(s) of an off-season item in stock.`,
+              why: `This item is not in demand in current ${season} season. Sales may be slow until the season returns.`,
+              impact: `Money used to buy this stock (${formatCurrency(blocked)}) may stay tied up for months.`,
+            }),
+            action: buildAction(
+              `Apply 15–20% off-season discount or bundle with seasonal items.`,
+              `Recover around ${formatCurrency(recoverable)} now instead of waiting months.`
+            ),
+            actionType: 'discount',
+            potentialLoss: blocked,
+            seasonTag: 'low-demand',
+          });
+        } else {
+          alerts.push({
+            type: 'SEASONAL_LOW', severity: 'info', productId: p.id, productName: p.name,
+            category: 'seasonal',
+            message: `❄️ ${p.name} is in low demand this ${season}.`,
+            reason: buildReason({
+              problem: `Off-season item — currently ${p.quantity} units in stock.`,
+              why: `This item is not in demand in current ${season} season. Sales may be slow.`,
+              impact: `Avoid overstocking — money tied up in slow-moving items.`,
+            }),
+            action: buildAction(
+              `Avoid overstocking. Don't bulk-reorder until demand returns.`,
+              `Keeps money free for items that actually sell now.`
+            ),
+            actionType: 'discount',
+            seasonTag: 'low-demand',
+          });
+        }
       }
     });
 
