@@ -512,13 +512,19 @@ export const AlertSvc = {
           } else if (cls === 'electronics') {
             why = 'Risk of leakage or malfunction. Selling can lead to returns and bad reviews.';
           }
+          // Missed-opportunity note when item is in high seasonal demand
+          const expDemand = getSeasonalDemand(p, season);
+          let missedOpportunity = '';
+          if (expDemand === 'high') {
+            missedOpportunity = ` This item is also in high demand this ${season} — due to expiry, you missed potential sales.`;
+          }
           alerts.push({
             type: 'EXPIRED', severity: 'danger', productId: p.id, productName: p.name,
             category: 'expired',
             message: `${p.name} — ${batch.quantity} units, expired ${Math.abs(d)} day(s) ago.`,
             reason: buildReason({
               problem: `${batch.quantity} unit(s) already expired.`,
-              why,
+              why: why + missedOpportunity,
               impact: `Loss incurred: ${formatCurrency(lossAmount)} (cost of unsold stock).`,
             }),
             action: buildAction(
@@ -529,6 +535,7 @@ export const AlertSvc = {
             actionType: 'remove',
             batchId: batch.id,
             batchQty: batch.quantity,
+            seasonTag: expDemand === 'high' ? 'high-demand' : expDemand === 'low' ? 'low-demand' : undefined,
           });
         }
         // EXPIRING SOON — 10-day window
@@ -639,6 +646,15 @@ export const AlertSvc = {
       });
 
       // === OUT OF STOCK — terminology: "missing profit" ===
+      const outDemand = getSeasonalDemand(p, season);
+      const outSeasonTag: 'high-demand' | 'low-demand' | undefined =
+        outDemand === 'high' ? 'high-demand' : outDemand === 'low' ? 'low-demand' : undefined;
+      const outSeasonNote = outDemand === 'high'
+        ? ` High seasonal demand — restock quickly to avoid losing sales.`
+        : outDemand === 'low'
+          ? ` Low seasonal demand — avoid overstocking when restocking.`
+          : '';
+
       if (p.quantity === 0) {
         const speed = getSalesSpeed(p);
         const missingProfitPerDay = speed * Math.max(0, p.sellingPrice - p.costPrice);
@@ -650,14 +666,15 @@ export const AlertSvc = {
             type: 'OUT_OF_STOCK', severity: 'danger', productId: p.id, productName: p.name,
             category: 'outofstock',
             message: `${p.name} is out of stock.`,
-            reason: `Out of stock — restock soon.`,
+            reason: `Out of stock — restock soon.${outSeasonNote}`,
             action: '👉 Reorder now',
-            actionType: 'reorder'
+            actionType: 'reorder',
+            seasonTag: outSeasonTag,
           });
         } else {
           const why = speed > 0
-            ? `Was selling ~${speed.toFixed(1)} units/day. ${seasonPhrase} Customers may switch to a competitor while you're out.`.trim()
-            : `Item is unavailable. ${seasonPhrase} Customers may switch to a competitor.`.trim();
+            ? `Was selling ~${speed.toFixed(1)} units/day. ${seasonPhrase}${outSeasonNote} Customers may switch to a competitor while you're out.`.trim()
+            : `Item is unavailable. ${seasonPhrase}${outSeasonNote} Customers may switch to a competitor.`.trim();
           const impact = speed > 0
             ? `Missing profit: ~${formatCurrency(missingProfitPerDay)}/day until you restock.`
             : `Potential profit missed every day this stays out of stock.`;
@@ -678,7 +695,8 @@ export const AlertSvc = {
                 ? `Restocking earns back ~${formatCurrency(missingProfitPerDay)}/day in profit.`
                 : `Avoid losing customers to competitors.`
             ),
-            actionType: 'reorder'
+            actionType: 'reorder',
+            seasonTag: outSeasonTag,
           });
         }
       }
@@ -694,15 +712,16 @@ export const AlertSvc = {
             type: 'LOW_STOCK', severity: 'warning', productId: p.id, productName: p.name,
             category: 'lowstock',
             message: `${p.name} — only ${p.quantity} units left.`,
-            reason: `Low stock — reorder soon.`,
+            reason: `Low stock — reorder soon.${outSeasonNote}`,
             action: '👉 Reorder',
             actionType: 'reorder',
-            daysLeft
+            daysLeft,
+            seasonTag: outSeasonTag,
           });
         } else {
           const why = speed > 0
-            ? `Selling ~${speed.toFixed(1)}/day. ${seasonPhrase} Stock will run out in ~${daysLeft} day(s).`.trim()
-            : `Stock is below your reorder point. ${seasonPhrase}`.trim();
+            ? `Selling ~${speed.toFixed(1)}/day. ${seasonPhrase}${outSeasonNote} Stock will run out in ~${daysLeft} day(s).`.trim()
+            : `Stock is below your reorder point. ${seasonPhrase}${outSeasonNote}`.trim();
           alerts.push({
             type: 'LOW_STOCK', severity: 'warning', productId: p.id, productName: p.name,
             category: 'lowstock',
@@ -719,7 +738,8 @@ export const AlertSvc = {
               `Keeps sales flowing and avoids running out.`
             ),
             actionType: 'reorder',
-            daysLeft
+            daysLeft,
+            seasonTag: outSeasonTag,
           });
         }
       }
