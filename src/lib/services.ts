@@ -1,4 +1,4 @@
-import DB, { type Product, type Alert, type Suggestion, type Sale, type ActionLog, type Batch, type BusinessMode } from './database';
+import DB, { type Product, type Alert, type Suggestion, type Sale, type ActionLog, type Batch, type BusinessMode, type Organization, type User } from './database';
 import { getDaysUntilExpiry, normalizeExpiryDate, parseExpiryDate } from './inventory-utils';
 
 function sanitizeProductInput(p: Partial<Product>): Partial<Product> {
@@ -212,6 +212,8 @@ export const Inv = {
     if (!p) return { error: 'Product not found.' };
     const batches = [...getProductBatches(p), makeBatch(qty, expiryDate)];
     const recomputed = recomputeProductFromBatches({ ...p, batches } as Product);
+    // Track reorder event for same-day overstock detection
+    ReorderTracker.record(p.businessId, id);
     return DB.update<Product>('products', id, recomputed);
   },
   deleteProduct: (id: string) => {
@@ -243,6 +245,112 @@ export const ActionHistory = {
   get: (bizId: string): ActionLog[] => {
     return DB.findMany<ActionLog>('action_logs', a => a.businessId === bizId)
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+};
+
+// === REORDER TRACKER ===
+// Tracks how many times a product was reordered today (per business).
+// Used to detect over-eager reordering when no sales have happened.
+const REORDER_KEY = 'srsis_reorder_tracker';
+type ReorderMap = Record<string, Record<string, { date: string; count: number }>>;
+
+export const ReorderTracker = {
+  read(): ReorderMap {
+    try { return JSON.parse(localStorage.getItem(REORDER_KEY) || '{}'); }
+    catch { return {}; }
+  },
+  write(data: ReorderMap) {
+    try { localStorage.setItem(REORDER_KEY, JSON.stringify(data)); } catch { /* noop */ }
+  },
+  todayKey(): string {
+    const d = new Date();
+    return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+  },
+  record(bizId: string, productId: string) {
+    const data = this.read();
+    const today = this.todayKey();
+    data[bizId] = data[bizId] || {};
+    const entry = data[bizId][productId];
+    if (entry && entry.date === today) {
+      entry.count += 1;
+    } else {
+      data[bizId][productId] = { date: today, count: 1 };
+    }
+    this.write(data);
+  },
+  // How many times product was reordered today
+  todayCount(bizId: string, productId: string): number {
+    const data = this.read();
+    const today = this.todayKey();
+    const entry = data[bizId]?.[productId];
+    if (!entry || entry.date !== today) return 0;
+    return entry.count;
+  },
+  clear(bizId: string) {
+    const data = this.read();
+    delete data[bizId];
+    this.write(data);
+  }
+};
+
+// === ORGANIZATION SERVICE ===
+// Owner-only updates and full delete (org + products + sales + logs).
+export const OrgSvc = {
+  update: (orgId: string, userId: string, updates: Partial<Organization>) => {
+    const org = DB.findOne<Organization>('businesses', o => o.id === orgId);
+    if (!org) return { error: 'Organization not found.' };
+    if (org.ownerId !== userId) return { error: 'Only the owner can update this organization.' };
+    // Whitelist editable fields — never let UI overwrite ownerId/mode/createdAt/id
+    const safe: Partial<Organization> = {};
+    if (updates.name !== undefined) safe.name = String(updates.name).trim();
+    if (updates.type !== undefined) safe.type = updates.type;
+    if (updates.address !== undefined) safe.address = updates.address;
+    if (updates.phone !== undefined) safe.phone = updates.phone;
+    if (updates.gstin !== undefined) safe.gstin = updates.gstin;
+    if (updates.currency !== undefined) safe.currency = updates.currency;
+    if (updates.warehouse !== undefined) safe.warehouse = updates.warehouse;
+    if (updates.shared !== undefined) safe.shared = updates.shared;
+    if (updates.secretKey !== undefined) safe.secretKey = updates.secretKey;
+    if (!safe.name) delete safe.name; // don't blank name
+    const updated = DB.update<Organization>('businesses', orgId, safe);
+    return { org: updated };
+  },
+  changePassword: (userId: string, oldPassword: string, newPassword: string) => {
+    const u = DB.findOne<{ id: string; password: string }>('users', x => x.id === userId);
+    if (!u) return { error: 'User not found.' };
+    if (u.password !== oldPassword) return { error: 'Current password is incorrect.' };
+    if (!newPassword || newPassword.length < 6) return { error: 'New password must be at least 6 characters.' };
+    DB.update<User>('users', userId, { password: newPassword } as Partial<User>);
+    return { ok: true };
+  },
+  changeSecretKey: (orgId: string, userId: string, password: string, newKey: string) => {
+    const u = DB.findOne<{ id: string; password: string }>('users', x => x.id === userId);
+    if (!u || u.password !== password) return { error: 'Password is incorrect.' };
+    const org = DB.findOne<Organization>('businesses', o => o.id === orgId);
+    if (!org) return { error: 'Organization not found.' };
+    if (org.ownerId !== userId) return { error: 'Only the owner can change the secret key.' };
+    DB.update<Organization>('businesses', orgId, { secretKey: newKey, shared: Boolean(newKey) } as Partial<Organization>);
+    return { ok: true };
+  },
+  // Full destructive delete — org + its products + sales + action logs.
+  // Does NOT touch other organizations of the same user.
+  delete: (orgId: string, userId: string, password: string) => {
+    const u = DB.findOne<{ id: string; password: string }>('users', x => x.id === userId);
+    if (!u || u.password !== password) return { error: 'Password is incorrect.' };
+    const org = DB.findOne<Organization>('businesses', o => o.id === orgId);
+    if (!org) return { error: 'Organization not found.' };
+    if (org.ownerId !== userId) return { error: 'Only the owner can delete this organization.' };
+
+    // Cascade: products, sales, action_logs scoped to this org only
+    const products = DB.findMany<Product>('products', p => p.businessId === orgId);
+    products.forEach(p => DB.del<Product>('products', p.id));
+    const sales = DB.findMany<Sale>('sales', s => s.businessId === orgId);
+    sales.forEach(s => DB.del<Sale>('sales', s.id));
+    const logs = DB.findMany<ActionLog>('action_logs', a => a.businessId === orgId);
+    logs.forEach(l => DB.del<ActionLog>('action_logs', l.id));
+    DB.del<Organization>('businesses', orgId);
+    ReorderTracker.clear(orgId);
+    return { ok: true };
   }
 };
 
@@ -404,13 +512,19 @@ export const AlertSvc = {
           } else if (cls === 'electronics') {
             why = 'Risk of leakage or malfunction. Selling can lead to returns and bad reviews.';
           }
+          // Missed-opportunity note when item is in high seasonal demand
+          const expDemand = getSeasonalDemand(p, season);
+          let missedOpportunity = '';
+          if (expDemand === 'high') {
+            missedOpportunity = ` This item is also in high demand this ${season} — due to expiry, you missed potential sales.`;
+          }
           alerts.push({
             type: 'EXPIRED', severity: 'danger', productId: p.id, productName: p.name,
             category: 'expired',
             message: `${p.name} — ${batch.quantity} units, expired ${Math.abs(d)} day(s) ago.`,
             reason: buildReason({
               problem: `${batch.quantity} unit(s) already expired.`,
-              why,
+              why: why + missedOpportunity,
               impact: `Loss incurred: ${formatCurrency(lossAmount)} (cost of unsold stock).`,
             }),
             action: buildAction(
@@ -421,6 +535,7 @@ export const AlertSvc = {
             actionType: 'remove',
             batchId: batch.id,
             batchQty: batch.quantity,
+            seasonTag: expDemand === 'high' ? 'high-demand' : expDemand === 'low' ? 'low-demand' : undefined,
           });
         }
         // EXPIRING SOON — 10-day window
@@ -531,6 +646,15 @@ export const AlertSvc = {
       });
 
       // === OUT OF STOCK — terminology: "missing profit" ===
+      const outDemand = getSeasonalDemand(p, season);
+      const outSeasonTag: 'high-demand' | 'low-demand' | undefined =
+        outDemand === 'high' ? 'high-demand' : outDemand === 'low' ? 'low-demand' : undefined;
+      const outSeasonNote = outDemand === 'high'
+        ? ` High seasonal demand — restock quickly to avoid losing sales.`
+        : outDemand === 'low'
+          ? ` Low seasonal demand — avoid overstocking when restocking.`
+          : '';
+
       if (p.quantity === 0) {
         const speed = getSalesSpeed(p);
         const missingProfitPerDay = speed * Math.max(0, p.sellingPrice - p.costPrice);
@@ -542,14 +666,15 @@ export const AlertSvc = {
             type: 'OUT_OF_STOCK', severity: 'danger', productId: p.id, productName: p.name,
             category: 'outofstock',
             message: `${p.name} is out of stock.`,
-            reason: `Out of stock — restock soon.`,
+            reason: `Out of stock — restock soon.${outSeasonNote}`,
             action: '👉 Reorder now',
-            actionType: 'reorder'
+            actionType: 'reorder',
+            seasonTag: outSeasonTag,
           });
         } else {
           const why = speed > 0
-            ? `Was selling ~${speed.toFixed(1)} units/day. ${seasonPhrase} Customers may switch to a competitor while you're out.`.trim()
-            : `Item is unavailable. ${seasonPhrase} Customers may switch to a competitor.`.trim();
+            ? `Was selling ~${speed.toFixed(1)} units/day. ${seasonPhrase}${outSeasonNote} Customers may switch to a competitor while you're out.`.trim()
+            : `Item is unavailable. ${seasonPhrase}${outSeasonNote} Customers may switch to a competitor.`.trim();
           const impact = speed > 0
             ? `Missing profit: ~${formatCurrency(missingProfitPerDay)}/day until you restock.`
             : `Potential profit missed every day this stays out of stock.`;
@@ -570,7 +695,8 @@ export const AlertSvc = {
                 ? `Restocking earns back ~${formatCurrency(missingProfitPerDay)}/day in profit.`
                 : `Avoid losing customers to competitors.`
             ),
-            actionType: 'reorder'
+            actionType: 'reorder',
+            seasonTag: outSeasonTag,
           });
         }
       }
@@ -586,15 +712,16 @@ export const AlertSvc = {
             type: 'LOW_STOCK', severity: 'warning', productId: p.id, productName: p.name,
             category: 'lowstock',
             message: `${p.name} — only ${p.quantity} units left.`,
-            reason: `Low stock — reorder soon.`,
+            reason: `Low stock — reorder soon.${outSeasonNote}`,
             action: '👉 Reorder',
             actionType: 'reorder',
-            daysLeft
+            daysLeft,
+            seasonTag: outSeasonTag,
           });
         } else {
           const why = speed > 0
-            ? `Selling ~${speed.toFixed(1)}/day. ${seasonPhrase} Stock will run out in ~${daysLeft} day(s).`.trim()
-            : `Stock is below your reorder point. ${seasonPhrase}`.trim();
+            ? `Selling ~${speed.toFixed(1)}/day. ${seasonPhrase}${outSeasonNote} Stock will run out in ~${daysLeft} day(s).`.trim()
+            : `Stock is below your reorder point. ${seasonPhrase}${outSeasonNote}`.trim();
           alerts.push({
             type: 'LOW_STOCK', severity: 'warning', productId: p.id, productName: p.name,
             category: 'lowstock',
@@ -611,7 +738,8 @@ export const AlertSvc = {
               `Keeps sales flowing and avoids running out.`
             ),
             actionType: 'reorder',
-            daysLeft
+            daysLeft,
+            seasonTag: outSeasonTag,
           });
         }
       }
@@ -656,6 +784,40 @@ export const AlertSvc = {
           ),
           actionType: 'discount',
           potentialLoss: capitalBlocked
+        });
+      }
+
+      // === SAME-DAY REORDER OVERSTOCK WARNING ===
+      // Triggered when user reorders the same item 2+ times today AND no sales have happened.
+      const reorderToday = ReorderTracker.todayCount(p.businessId, p.id);
+      if (reorderToday >= 2 && p.salesCount === 0 && p.quantity > 0) {
+        const capitalAtRisk = p.costPrice * p.quantity;
+        const sDemand = getSeasonalDemand(p, season);
+        let why = 'Stock is being increased without any sales. Wait and observe sales before ordering more.';
+        let action = 'Pause reordering. Wait at least a few days to see how this item actually sells.';
+        if (sDemand === 'low') {
+          why = 'This item is not selling and stock is increasing. Demand is low this season — you may face loss if items remain unsold.';
+          action = 'Stop reordering. Try a small discount or wait until demand returns.';
+        } else if (sDemand === 'high') {
+          why = 'Demand is high, but ordering too much at once may block your money. Consider ordering in smaller batches (weekly/monthly).';
+          action = 'Switch to smaller weekly orders instead of bulk. Match supply to actual sales.';
+        }
+        alerts.push({
+          type: 'REPEAT_REORDER', severity: 'warning', productId: p.id, productName: p.name,
+          category: 'overstock',
+          message: `${p.name}: reordered ${reorderToday}× today with no sales yet.`,
+          reason: buildReason({
+            problem: `Stock increased ${reorderToday} times today, but 0 sales recorded.`,
+            why,
+            impact: `Money used to buy these items (${formatCurrency(capitalAtRisk)}) is sitting idle.`,
+          }),
+          action: buildAction(
+            action,
+            `Avoid blocking money in stock that isn't proven to sell.`
+          ),
+          actionType: 'discount',
+          potentialLoss: capitalAtRisk,
+          seasonTag: sDemand === 'high' ? 'high-demand' : sDemand === 'low' ? 'low-demand' : undefined,
         });
       }
 
@@ -739,43 +901,88 @@ export const AlertSvc = {
       }
 
       // === SEASONAL — only for relevant categories (Electronics, Clothing, Beverages) ===
+      // Always emits BOTH high-demand and low-demand info so the user can see seasonal balance.
       const seasonalDemand = getSeasonalDemand(p, season);
-      if (seasonalDemand === 'high' && p.quantity <= p.reorderPoint * 2) {
+      if (seasonalDemand === 'high') {
+        // High demand: tell user it's in season. Push harder if stock is also low.
+        const isLowStock = p.quantity <= p.reorderPoint * 2;
         const reorderQty = sensibleReorderQty(p) * 2;
-        alerts.push({
-          type: 'SEASONAL_DEMAND', severity: 'warning', productId: p.id, productName: p.name,
-          category: 'seasonal',
-          message: `${season.charAt(0).toUpperCase() + season.slice(1)} demand: ${p.name} only ${p.quantity} units left.`,
-          reason: buildReason({
-            problem: `Only ${p.quantity} unit(s) left of a seasonal hot-seller.`,
-            why: `This item is in high demand during ${season}. Demand is rising due to weather and usage patterns.`,
-            impact: `Running out now means missing peak-season sales.`,
-          }),
-          action: buildAction(
-            `Stock up! Reorder at least ${reorderQty} units to cover peak demand.`,
-            `Captures peak-season profit while demand is high.`
-          ),
-          actionType: 'reorder'
-        });
-      } else if (seasonalDemand === 'low' && p.quantity > p.reorderPoint * 3) {
-        const blocked = p.costPrice * p.quantity;
-        const recoverable = Math.round(p.sellingPrice * 0.8) * p.quantity;
-        alerts.push({
-          type: 'SEASONAL_DEMAND', severity: 'info', productId: p.id, productName: p.name,
-          category: 'seasonal',
-          message: `Off-season: ${p.name} has ${p.quantity} units while demand is low.`,
-          reason: buildReason({
-            problem: `${p.quantity} unit(s) of an off-season item in stock.`,
-            why: `This item is in low demand during ${season}. Sales typically slow until the season returns.`,
-            impact: `Money used to buy this stock (${formatCurrency(blocked)}) may stay tied up for months.`,
-          }),
-          action: buildAction(
-            `Apply 15–20% off-season discount or bundle with seasonal items.`,
-            `Recover around ${formatCurrency(recoverable)} now instead of waiting months.`
-          ),
-          actionType: 'discount',
-          potentialLoss: blocked
-        });
+        if (isLowStock) {
+          alerts.push({
+            type: 'SEASONAL_DEMAND', severity: 'warning', productId: p.id, productName: p.name,
+            category: 'seasonal',
+            message: `🔥 ${season.charAt(0).toUpperCase() + season.slice(1)} hot-seller: ${p.name} only ${p.quantity} units left.`,
+            reason: buildReason({
+              problem: `Only ${p.quantity} unit(s) left of a seasonal hot-seller.`,
+              why: `This item is in high demand during ${season}. Sales may be faster than usual due to weather and usage patterns.`,
+              impact: `Running out now means missing peak-season sales.`,
+            }),
+            action: buildAction(
+              `Stock up! Reorder at least ${reorderQty} units to cover peak demand.`,
+              `Captures peak-season profit while demand is high.`
+            ),
+            actionType: 'reorder',
+            seasonTag: 'high-demand',
+          });
+        } else {
+          alerts.push({
+            type: 'SEASONAL_HIGH', severity: 'info', productId: p.id, productName: p.name,
+            category: 'seasonal',
+            message: `🔥 ${p.name} is in high demand this ${season}.`,
+            reason: buildReason({
+              problem: `Seasonal hot-seller in your inventory (${p.quantity} units).`,
+              why: `This item is in high demand during ${season}. Sales may be faster than usual.`,
+              impact: `Don't let stock run out — peak-season profit at stake.`,
+            }),
+            action: buildAction(
+              `Keep stock healthy. Watch sales speed and reorder before running low.`,
+              `Captures peak-season demand without missing customers.`
+            ),
+            actionType: 'reorder',
+            seasonTag: 'high-demand',
+          });
+        }
+      } else if (seasonalDemand === 'low') {
+        // Low demand: warn against overstocking.
+        const isOverstock = p.quantity > p.reorderPoint * 3;
+        if (isOverstock) {
+          const blocked = p.costPrice * p.quantity;
+          const recoverable = Math.round(p.sellingPrice * 0.8) * p.quantity;
+          alerts.push({
+            type: 'SEASONAL_DEMAND', severity: 'info', productId: p.id, productName: p.name,
+            category: 'seasonal',
+            message: `❄️ Off-season: ${p.name} has ${p.quantity} units while demand is low.`,
+            reason: buildReason({
+              problem: `${p.quantity} unit(s) of an off-season item in stock.`,
+              why: `This item is not in demand in current ${season} season. Sales may be slow until the season returns.`,
+              impact: `Money used to buy this stock (${formatCurrency(blocked)}) may stay tied up for months.`,
+            }),
+            action: buildAction(
+              `Apply 15–20% off-season discount or bundle with seasonal items.`,
+              `Recover around ${formatCurrency(recoverable)} now instead of waiting months.`
+            ),
+            actionType: 'discount',
+            potentialLoss: blocked,
+            seasonTag: 'low-demand',
+          });
+        } else {
+          alerts.push({
+            type: 'SEASONAL_LOW', severity: 'info', productId: p.id, productName: p.name,
+            category: 'seasonal',
+            message: `❄️ ${p.name} is in low demand this ${season}.`,
+            reason: buildReason({
+              problem: `Off-season item — currently ${p.quantity} units in stock.`,
+              why: `This item is not in demand in current ${season} season. Sales may be slow.`,
+              impact: `Avoid overstocking — money tied up in slow-moving items.`,
+            }),
+            action: buildAction(
+              `Avoid overstocking. Don't bulk-reorder until demand returns.`,
+              `Keeps money free for items that actually sell now.`
+            ),
+            actionType: 'discount',
+            seasonTag: 'low-demand',
+          });
+        }
       }
     });
 

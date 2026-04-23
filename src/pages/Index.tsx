@@ -125,7 +125,19 @@ export default function Index() {
         />
       )}
       {screen === 'dashboard' && user && org && mode && (
-        <DashboardScreen user={user} business={org} mode={mode} onLogout={logout} onBackToModeSelect={backToModeSelect} />
+        <DashboardScreen
+          user={user}
+          business={org}
+          mode={mode}
+          onLogout={logout}
+          onBackToModeSelect={backToModeSelect}
+          onOrgUpdated={(o) => setOrg(o)}
+          onOrgDeleted={() => {
+            localStorage.removeItem('srsis_session_org');
+            setOrg(null);
+            setScreen('org_choice');
+          }}
+        />
       )}
     </>
   );
