@@ -450,6 +450,103 @@ export default function DashboardScreen({ user, business, mode, onLogout, onBack
         )}
       </AnimatePresence>
 
+      {/* SETTINGS DIALOG */}
+      <AnimatePresence>
+        {settingsOpen && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-background/70 backdrop-blur-sm z-[60]" onClick={() => { setSettingsOpen(false); setSettingsErr(''); setSettingsOk(''); }} />
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[61] glass p-0 max-w-2xl w-[95%] max-h-[90vh] overflow-hidden flex flex-col">
+              <div className="flex items-center justify-between border-b border-border px-5 py-3">
+                <h3 className="text-base font-bold text-primary flex items-center gap-2"><SettingsIcon size={16} /> Organization Settings</h3>
+                <button onClick={() => { setSettingsOpen(false); setSettingsErr(''); setSettingsOk(''); }} className="text-muted-foreground hover:text-foreground"><X size={16} /></button>
+              </div>
+              <div className="flex gap-1 px-3 pt-3 border-b border-border overflow-x-auto">
+                {([['org','🏢 Organization'],['account','🔑 Account'],['security','🛡️ Security'],['danger','⚠️ Danger Zone']] as const).map(([id,label]) => (
+                  <button key={id} onClick={() => { setSettingsTab(id); setSettingsErr(''); setSettingsOk(''); }} className={`px-3 py-2 text-xs font-bold rounded-t-lg whitespace-nowrap transition-all ${settingsTab === id ? 'bg-primary/10 text-primary border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}`}>{label}</button>
+                ))}
+              </div>
+              <div className="p-5 overflow-y-auto flex-1">
+                {settingsErr && <div className="bg-destructive/10 border border-destructive/30 rounded-xl p-2 text-destructive text-xs mb-3">⚠ {settingsErr}</div>}
+                {settingsOk && <div className="bg-accent/10 border border-accent/30 rounded-xl p-2 text-accent text-xs mb-3">{settingsOk}</div>}
+
+                {settingsTab === 'org' && (
+                  <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground mb-2">Update your organization details. Inventory, alerts, and history are NOT affected.</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div><label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Name *</label><input value={orgEdit.name} onChange={e => setOrgEdit(o => ({ ...o, name: e.target.value }))} className={inputCls} /></div>
+                      <div><label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Type</label><select value={orgEdit.type} onChange={e => setOrgEdit(o => ({ ...o, type: e.target.value }))} className={inputCls}>{BUSINESS_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+                      <div className="md:col-span-2"><label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Address</label><input value={orgEdit.address} onChange={e => setOrgEdit(o => ({ ...o, address: e.target.value }))} className={inputCls} /></div>
+                      <div><label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Phone</label><input value={orgEdit.phone} onChange={e => setOrgEdit(o => ({ ...o, phone: e.target.value.replace(/[^0-9+\-\s()]/g, '') }))} placeholder="+91 90000 00000" className={inputCls} /></div>
+                      <div><label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">GSTIN</label><input value={orgEdit.gstin} onChange={e => setOrgEdit(o => ({ ...o, gstin: e.target.value }))} className={inputCls} /></div>
+                      <div><label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Currency</label><select value={orgEdit.currency} onChange={e => setOrgEdit(o => ({ ...o, currency: e.target.value }))} className={inputCls}>{CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+                    </div>
+                    <div className="flex gap-2 pt-2">
+                      <button onClick={saveOrgDetails} className="bg-primary/15 border border-primary/30 text-primary font-bold py-2 px-5 rounded-xl text-sm hover:bg-primary/25 flex items-center gap-2"><Check size={14} /> Save Changes</button>
+                      <button onClick={() => setOrgEdit({ name: business.name, type: business.type, address: business.address, phone: business.phone, currency: business.currency, gstin: business.gstin })} className="bg-muted/30 border border-border text-muted-foreground font-bold py-2 px-5 rounded-xl text-sm hover:bg-muted/50">Cancel</button>
+                    </div>
+                  </div>
+                )}
+
+                {settingsTab === 'account' && (
+                  <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground mb-2">Change your account password. Requires your current password.</p>
+                    <div className="space-y-3 max-w-md">
+                      <div>
+                        <label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Current Password</label>
+                        <div className="relative"><input type={pwdEdit.show ? 'text' : 'password'} value={pwdEdit.old} onChange={e => setPwdEdit(p => ({ ...p, old: e.target.value }))} className={inputCls + ' pr-9'} /><button type="button" onClick={() => setPwdEdit(p => ({ ...p, show: !p.show }))} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">{pwdEdit.show ? <EyeOff size={14} /> : <Eye size={14} />}</button></div>
+                      </div>
+                      <div><label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">New Password (min 6)</label><input type={pwdEdit.show ? 'text' : 'password'} value={pwdEdit.next} onChange={e => setPwdEdit(p => ({ ...p, next: e.target.value }))} className={inputCls} /></div>
+                      <div><label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Confirm New Password</label><input type={pwdEdit.show ? 'text' : 'password'} value={pwdEdit.confirm} onChange={e => setPwdEdit(p => ({ ...p, confirm: e.target.value }))} className={inputCls} /></div>
+                      <div className="flex gap-2">
+                        <button onClick={savePassword} className="bg-primary/15 border border-primary/30 text-primary font-bold py-2 px-5 rounded-xl text-sm hover:bg-primary/25 flex items-center gap-2"><Check size={14} /> Change Password</button>
+                        <button onClick={() => setPwdEdit({ old: '', next: '', confirm: '', show: false })} className="bg-muted/30 border border-border text-muted-foreground font-bold py-2 px-5 rounded-xl text-sm hover:bg-muted/50">Cancel</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {settingsTab === 'security' && (
+                  <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground mb-2">The secret key lets you share this organization with other users. Leave blank to disable sharing. Requires your account password.</p>
+                    <div className="space-y-3 max-w-md">
+                      <div><label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Account Password</label><input type="password" value={keyEdit.password} onChange={e => setKeyEdit(k => ({ ...k, password: e.target.value }))} className={inputCls} /></div>
+                      <div>
+                        <label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">New Secret Key {!keyEdit.newKey && <span className="text-muted-foreground/60 normal-case">(empty = disable sharing)</span>}</label>
+                        <div className="relative"><input type={keyEdit.show ? 'text' : 'password'} value={keyEdit.newKey} onChange={e => setKeyEdit(k => ({ ...k, newKey: e.target.value }))} className={inputCls + ' pr-9'} /><button type="button" onClick={() => setKeyEdit(k => ({ ...k, show: !k.show }))} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">{keyEdit.show ? <EyeOff size={14} /> : <Eye size={14} />}</button></div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button onClick={saveSecretKey} className="bg-primary/15 border border-primary/30 text-primary font-bold py-2 px-5 rounded-xl text-sm hover:bg-primary/25 flex items-center gap-2"><KeyRound size={14} /> Update Secret Key</button>
+                        <button onClick={() => setKeyEdit({ password: '', newKey: '', show: false })} className="bg-muted/30 border border-border text-muted-foreground font-bold py-2 px-5 rounded-xl text-sm hover:bg-muted/50">Cancel</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {settingsTab === 'danger' && (
+                  <div className="space-y-3">
+                    <div className="bg-destructive/10 border border-destructive/30 rounded-xl p-4">
+                      <h4 className="text-sm font-bold text-destructive flex items-center gap-2 mb-2"><Trash2 size={14} /> Delete Organization</h4>
+                      <p className="text-xs text-foreground/80 mb-1">Are you sure you want to delete <strong>{business.name}</strong>?</p>
+                      <p className="text-xs text-muted-foreground mb-3">All inventory data, alerts, and history will be permanently removed. Your other organizations will not be affected. Only the owner can perform this action.</p>
+                      <div className="space-y-3 max-w-md">
+                        <div><label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Account Password</label>
+                          <div className="relative"><input type={deleteConfirm.show ? 'text' : 'password'} value={deleteConfirm.password} onChange={e => setDeleteConfirm(d => ({ ...d, password: e.target.value }))} className={inputCls + ' pr-9'} /><button type="button" onClick={() => setDeleteConfirm(d => ({ ...d, show: !d.show }))} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">{deleteConfirm.show ? <EyeOff size={14} /> : <Eye size={14} />}</button></div>
+                        </div>
+                        <div><label className="block text-[10px] text-muted-foreground font-bold uppercase mb-1">Type <span className="text-destructive">DELETE</span> to confirm</label><input value={deleteConfirm.text} onChange={e => setDeleteConfirm(d => ({ ...d, text: e.target.value }))} placeholder="DELETE" className={inputCls + ' font-mono'} /></div>
+                        <div className="flex gap-2">
+                          <button onClick={confirmDeleteOrg} className="bg-destructive/20 border border-destructive/40 text-destructive font-bold py-2 px-5 rounded-xl text-sm hover:bg-destructive/30 flex items-center gap-2"><Trash2 size={14} /> Confirm Delete</button>
+                          <button onClick={() => setDeleteConfirm({ password: '', text: '', show: false })} className="bg-muted/30 border border-border text-muted-foreground font-bold py-2 px-5 rounded-xl text-sm hover:bg-muted/50">Cancel</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
       {/* SIDEBAR */}
       <AnimatePresence>
         {sidebarOpen && (
